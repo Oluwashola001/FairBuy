@@ -1,14 +1,12 @@
-// app/(tabs)/_layout.tsx
+// app/(seller)/_layout.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Platform } from 'react-native';
-
-// Import theme context
 import { useTheme } from '../contexts/ThemeContext';
 
 const brandColor = "#4B56E9";
 
-export default function TabLayout() {
+export default function SellerLayout() {
   const { theme } = useTheme();
 
   return (
@@ -18,16 +16,12 @@ export default function TabLayout() {
         tabBarInactiveTintColor: theme.textSecondary,
         tabBarStyle: {
           backgroundColor: theme.card,
-          borderTopWidth: 0.1,
+          borderTopWidth: 1,
           borderTopColor: theme.border,
           height: Platform.OS === 'ios' ? 85 : 70,
           paddingBottom: Platform.OS === 'ios' ? 25 : 10,
           paddingTop: 8,
-          shadowColor: theme.shadow.split('(')[0], // Extract color from rgba
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: theme.shadow.includes('0.1') ? 0.1 : 0.3,
-          shadowRadius: 8,
-          elevation: 8,
+          ...theme.shadow,
         },
         tabBarLabelStyle: {
           fontSize: 12,
@@ -38,7 +32,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="home"
+        name="dashboard"
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size, focused }) => (
@@ -52,12 +46,12 @@ export default function TabLayout() {
       />
       
       <Tabs.Screen
-        name="cart"
+        name="orders"
         options={{
-          title: 'Cart',
+          title: 'Orders',
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons 
-              name={focused ? 'cart' : 'cart-outline'} 
+              name={focused ? 'basket' : 'basket-outline'} 
               size={24} 
               color={color} 
             />

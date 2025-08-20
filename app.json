@@ -16,7 +16,8 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.henrywalkerme.myapp"
     },
     "web": {
       "bundler": "metro",
@@ -37,6 +38,19 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0f0fbb3c-6aed-493b-bee6-9b25c76baed3"
+      }
+    },
+    "owner": "henrywalkerme",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0f0fbb3c-6aed-493b-bee6-9b25c76baed3"
     }
   }
 }
