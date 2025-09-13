@@ -6,6 +6,8 @@ import React from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
+import Toast from 'react-native-toast-message'; // <-- import toast
+import { CartProvider } from './contexts/CartContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 
 export default function RootLayout() {
@@ -18,10 +20,13 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack />
-        <StatusBar style="auto" />
-      </NavigationThemeProvider>
+      <CartProvider>
+        <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack />
+          <StatusBar style="auto" />
+          <Toast /> {/* <-- add Toast component here */}
+        </NavigationThemeProvider>
+      </CartProvider>
     </ThemeProvider>
   );
 }

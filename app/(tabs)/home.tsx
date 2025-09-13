@@ -19,6 +19,9 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import Toast from 'react-native-toast-message';
+import { useCart } from "../contexts/CartContext";
+
 
 // Import theme context
 import { useTheme } from '../contexts/ThemeContext';
@@ -361,6 +364,7 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
 };
 
 export default function HomeScreen() {
+  const { addToCart } = useCart();
   const router = useRouter();
   const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
@@ -497,7 +501,7 @@ export default function HomeScreen() {
   };
 
   // UPDATED: Enhanced ProductCard component with proper navigation
-const ProductCard = ({ product }) => {
+const ProductCard = ({ product, addToCart }) => {
   const handleProductPress = () => {
     // Navigate to product details screen with product data
     router.push(`/products/product-details?product=${encodeURIComponent(JSON.stringify(product))}`);
@@ -549,9 +553,21 @@ const ProductCard = ({ product }) => {
               )}
               <Text style={styles.productPrice}>${product.price}</Text>
             </View>
-            <TouchableOpacity style={styles.addToCartButton}>
-              <Ionicons name="add" size={16} color={brandColor} />
-            </TouchableOpacity>
+            <TouchableOpacity
+  style={styles.addToCartButton}
+  onPress={() => {
+    addToCart(product); // add product to cart
+    Toast.show({
+      type: 'success',
+      text1: 'Added to Cart',
+      text2: `${product.name} has been added successfully.`,
+      position: 'top',
+      visibilityTime: 2000,
+    });
+  }}
+>
+  <Ionicons name="add" size={16} color={brandColor} />
+</TouchableOpacity>
           </View>
         </View>
       </TouchableOpacity>
@@ -711,8 +727,11 @@ const ProductCard = ({ product }) => {
           
           <FlatList
             data={filteredProducts}
-            renderItem={({ item }) => <ProductCard product={item} />}
-            keyExtractor={(item) => item.id.toString()}
+            renderItem={({ item }) => <ProductCard product={item} addToCart={addToCart} />}
+            keyExtractor={(item, index) =>
+              item.isUserGenerated ? `user_${item.id}_${index}` : `prod_${item.id}_${index}`
+            }
+
             numColumns={2}
             columnWrapperStyle={styles.productRow}
             showsVerticalScrollIndicator={false}
