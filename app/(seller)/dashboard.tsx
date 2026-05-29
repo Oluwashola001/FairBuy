@@ -15,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from '../contexts/ThemeContext';
 
 const brandColor = "#4B56E9";
-const router = useRouter();
+
 
 // Onboarding Modal Component
 const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
@@ -127,6 +127,7 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
 
 export default function SellerDashboard() {
   const { theme, isDark } = useTheme();
+  const router = useRouter();
   
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -160,7 +161,7 @@ export default function SellerDashboard() {
   const stats = [
     { 
       icon: "💰", 
-      value: "$15,000", 
+      value: "$1,500", 
       label: "Total Sales",
       iconColor: "#FF6B35"
     },
@@ -297,6 +298,15 @@ export default function SellerDashboard() {
         barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor={theme.background}
       />
+       {/* Header */}
+          <View 
+            style={[
+              styles.header,
+              showOnboarding && !isElementHighlighted('header') && styles.blurredElement
+            ]}
+          >
+            <Text style={styles.greeting}>Welcome back 👨‍💼</Text>
+          </View>
       <SafeAreaView style={styles.safe} edges={["top"]}>
         {/* Blur overlay for non-highlighted elements */}
         {showOnboarding && (
@@ -308,15 +318,7 @@ export default function SellerDashboard() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          {/* Header */}
-          <View 
-            style={[
-              styles.header,
-              showOnboarding && !isElementHighlighted('header') && styles.blurredElement
-            ]}
-          >
-            <Text style={styles.greeting}>Welcome back 👨‍💼</Text>
-          </View>
+         
 
           {/* Notification Banner */}
           <View 
@@ -461,7 +463,9 @@ const createStyles = (theme) => StyleSheet.create({
     shadowRadius: 15,
   },
   header: {
-    marginBottom: 20,
+    marginTop: 40,
+    paddingHorizontal: 20,
+
   },
   greeting: {
     fontSize: 22,
@@ -495,7 +499,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: theme.card,
+    backgroundColor: theme.background,
+    borderWidth: 1,
+    borderColor: theme.border,
     paddingVertical: 20,
     paddingHorizontal: 12,
     borderRadius: 16,
@@ -561,7 +567,7 @@ const createStyles = (theme) => StyleSheet.create({
     textAlign: "center",
   },
   ordersSection: {
-    backgroundColor: theme.card,
+    backgroundColor: theme.background,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 20,

@@ -3,12 +3,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import {
-    SafeAreaView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useTheme } from './contexts/ThemeContext';
 
@@ -156,6 +156,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
+    paddingTop: 32,
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
   },

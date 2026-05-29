@@ -1,8 +1,6 @@
 // app/(tabs)/home.tsx
-import {
-  Ionicons
-} from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,7 +19,6 @@ import {
 } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { useCart } from "../contexts/CartContext";
-
 
 // Import theme context
 import { useTheme } from '../contexts/ThemeContext';
@@ -156,7 +153,7 @@ const AnimatedHandWave = () => {
 };
 
 // Animated Discount Badge Component
-const AnimatedDiscountBadge = ({ discount, styles }) => {
+const AnimatedDiscountBadge = ({ discount, styles }: any) => {
   const pulseAnimation = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -195,7 +192,7 @@ const AnimatedDiscountBadge = ({ discount, styles }) => {
 };
 
 // Animated Chat Support FAB Component
-const AnimatedChatFAB = ({ style, children, ...props }) => {
+const AnimatedChatFAB = ({ style, children, ...props }: any) => {
   const bounceAnimation = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -244,7 +241,7 @@ const AnimatedChatFAB = ({ style, children, ...props }) => {
   );
 };
 
-const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
+const OnboardingModal = ({ visible, step, onNext, onSkip }: any) => {
   const { theme } = useTheme();
   
   const steps = [
@@ -273,13 +270,13 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
 
   const currentStep = steps[step];
 
-  const getArrowStyle = (direction) => {
+  const getArrowStyle = (direction: string) => {
     const baseArrow = {
-      position: 'absolute',
+      position: 'absolute' as const,
       width: 0,
       height: 0,
       backgroundColor: 'transparent',
-      borderStyle: 'solid',
+      borderStyle: 'solid' as const,
     };
 
     switch (direction) {
@@ -332,7 +329,7 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
     <Modal visible={visible} transparent animationType="fade">
       <View style={dynamicStyles.onboardingOverlay}>
         {/* Positioned Tooltip */}
-        <View style={[dynamicStyles.tooltipContainer, currentStep.position]}>
+        <View style={[dynamicStyles.tooltipContainer, currentStep.position as any]}>
           <View style={getArrowStyle(currentStep.arrowDirection)} />
           <Text style={dynamicStyles.tooltipTitle}>{currentStep.title}</Text>
           <Text style={dynamicStyles.tooltipDescription}>{currentStep.description}</Text>
@@ -366,17 +363,17 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }) => {
 export default function HomeScreen() {
   const { addToCart } = useCart();
   const router = useRouter();
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Home');
-  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [favorites, setFavorites] = useState(new Set());
   const [profileImage, setProfileImage] = useState('https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face');
   
   // NEW: State for user-generated products
-  const [userProducts, setUserProducts] = useState([]);
+  const [userProducts, setUserProducts] = useState<any[]>([]);
   const [allProducts, setAllProducts] = useState(hardcodedProducts);
   
   const categoryScrollRef = useRef(null);
@@ -384,16 +381,34 @@ export default function HomeScreen() {
   // Create dynamic styles using theme
   const styles = createStyles(theme);
 
-  // NEW: Load user-generated products from AsyncStorage
+  // Load user-generated products from Supabase Database
   const loadUserProducts = async () => {
     try {
-      const savedProductsJson = await AsyncStorage.getItem('userProducts');
-      if (savedProductsJson) {
-        const savedProducts = JSON.parse(savedProductsJson);
-        setUserProducts(savedProducts);
+      const { data: products, error } = await supabase
+        .from('products')
+        .select('*');
+
+      if (error) throw error;
+
+      if (products && products.length > 0) {
+        // Map database columns to match the frontend product card expectations
+        const mappedProducts = products.map(p => ({
+          ...p,
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          category: p.category,
+          image: p.image_url, // map image_url to image
+          rating: 0,          // Add default values for UI rendering
+          reviews: 0,
+          discount: 0,
+          isUserGenerated: true 
+        }));
+
+        setUserProducts(mappedProducts);
         
         // Combine user products (first) with hardcoded products (second)
-        const combinedProducts = [...savedProducts, ...hardcodedProducts];
+        const combinedProducts = [...mappedProducts, ...hardcodedProducts];
         setAllProducts(combinedProducts);
       } else {
         // No user products, use only hardcoded
@@ -401,55 +416,42 @@ export default function HomeScreen() {
         setUserProducts([]);
       }
     } catch (error) {
-      console.error('Error loading user products:', error);
+      console.error('Error loading products from Supabase:', error);
       // Fallback to hardcoded products
       setAllProducts(hardcodedProducts);
       setUserProducts([]);
     }
   };
 
-  // Load profile image from AsyncStorage
+  // Load profile image from Supabase Auth MetaData
   const loadProfileImage = async () => {
     try {
-      const savedImage = await AsyncStorage.getItem('profileImage');
-      if (savedImage) {
-        setProfileImage(savedImage);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.user_metadata?.avatar_url) {
+        setProfileImage(user.user_metadata.avatar_url);
       }
     } catch (error) {
       console.error('Error loading profile image:', error);
     }
   };
 
-  // Load profile image when component mounts
+  // Load profile image and products when component mounts
   useEffect(() => {
     loadProfileImage();
-    loadUserProducts(); // Load user products on mount
+    loadUserProducts();
   }, []);
 
-  // Load profile image and user products when screen comes into focus
+  // Reload profile image and products when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       loadProfileImage();
-      loadUserProducts(); // Reload products when returning to screen
+      loadUserProducts();
     }, [])
   );
 
-  // Mark user-generated products for identification
-  useEffect(() => {
-    // Add isUserGenerated flag to user products for easy identification
-    const markedUserProducts = userProducts.map(product => ({
-      ...product,
-      isUserGenerated: true
-    }));
-    
-    // Combine marked user products with hardcoded products
-    const combinedProducts = [...markedUserProducts, ...hardcodedProducts];
-    setAllProducts(combinedProducts);
-  }, [userProducts]);
-
   useEffect(() => {
     // Filter products based on search and category
-    let filtered = allProducts; // Now uses combined products (user + hardcoded)
+    let filtered = allProducts; // Uses combined products (user + hardcoded)
     
     if (searchQuery.trim()) {
       filtered = filtered.filter(product =>
@@ -462,10 +464,9 @@ export default function HomeScreen() {
     if (selectedCategory !== 'Home') {
       filtered = filtered.filter(product => product.category === selectedCategory);
     }
-    // If selectedCategory is 'Home', we show all products (no filtering)
     
     setFilteredProducts(filtered);
-  }, [searchQuery, selectedCategory, allProducts]); // Added allProducts as dependency
+  }, [searchQuery, selectedCategory, allProducts]);
 
   const handleNextOnboarding = () => {
     if (onboardingStep < 2) {
@@ -479,7 +480,7 @@ export default function HomeScreen() {
     setShowOnboarding(false);
   };
 
-  const toggleFavorite = (productId) => {
+  const toggleFavorite = (productId: any) => {
     const newFavorites = new Set(favorites);
     if (newFavorites.has(productId)) {
       newFavorites.delete(productId);
@@ -489,7 +490,7 @@ export default function HomeScreen() {
     setFavorites(newFavorites);
   };
 
-  const isElementHighlighted = (elementType) => {
+  const isElementHighlighted = (elementType: string) => {
     if (!showOnboarding) return false;
     
     switch (onboardingStep) {
@@ -501,11 +502,11 @@ export default function HomeScreen() {
   };
 
   // UPDATED: Enhanced ProductCard component with proper navigation
-const ProductCard = ({ product, addToCart }) => {
-  const handleProductPress = () => {
-    // Navigate to product details screen with product data
-    router.push(`/products/product-details?product=${encodeURIComponent(JSON.stringify(product))}`);
-  };
+  const ProductCard = ({ product, addToCart }: any) => {
+    const handleProductPress = () => {
+      // Navigate to product details screen with product data
+      router.push(`/products/product-details?product=${encodeURIComponent(JSON.stringify(product))}`);
+    };
 
     return (
       <TouchableOpacity style={styles.productCard} onPress={handleProductPress}>
@@ -554,27 +555,27 @@ const ProductCard = ({ product, addToCart }) => {
               <Text style={styles.productPrice}>${product.price}</Text>
             </View>
             <TouchableOpacity
-  style={styles.addToCartButton}
-  onPress={() => {
-    addToCart(product); // add product to cart
-    Toast.show({
-      type: 'success',
-      text1: 'Added to Cart',
-      text2: `${product.name} has been added successfully.`,
-      position: 'top',
-      visibilityTime: 2000,
-    });
-  }}
->
-  <Ionicons name="add" size={16} color={brandColor} />
-</TouchableOpacity>
+              style={styles.addToCartButton}
+              onPress={() => {
+                addToCart(product); // add product to cart
+                Toast.show({
+                  type: 'success',
+                  text1: 'Added to Cart',
+                  text2: `${product.name} has been added successfully.`,
+                  position: 'top',
+                  visibilityTime: 2000,
+                });
+              }}
+            >
+              <Ionicons name="add" size={16} color={brandColor} />
+            </TouchableOpacity>
           </View>
         </View>
       </TouchableOpacity>
     );
   };
 
-  const CategoryChip = ({ category, isSelected, onPress }) => (
+  const CategoryChip = ({ category, isSelected, onPress }: any) => (
     <TouchableOpacity 
       style={[styles.categoryChip, isSelected && styles.selectedCategoryChip]}
       onPress={onPress}
@@ -587,8 +588,20 @@ const ProductCard = ({ product, addToCart }) => {
 
   return (
     <View style={styles.mainContainer}>
-      <StatusBar style={theme.statusBar} />
-      
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <View style={styles.topBar}>
+        <View style={styles.logoContainer}>
+          <Image source={require('@/assets/images/logo.png')} style={styles.logo} />
+          <Text style={styles.logoText}>FairTrade</Text>
+        </View>
+        
+        <View style={styles.rightSection}>
+          <TouchableOpacity style={styles.notificationButton}>
+            <Ionicons name="notifications-outline" size={20} color={theme.textSecondary} />
+            <View style={styles.notificationBadge} />
+          </TouchableOpacity>
+        </View>
+      </View>
       {/* Blur overlay for non-highlighted elements */}
       {showOnboarding && (
         <View style={styles.blurOverlay} pointerEvents="none" />
@@ -604,35 +617,25 @@ const ProductCard = ({ product, addToCart }) => {
           styles.header,
           showOnboarding && !isElementHighlighted('profile') && styles.blurredElement
         ]}>
-          <View style={styles.topBar}>
-            <View style={styles.logoContainer}>
-              <Image source={require('@/assets/images/logo.png')} style={styles.logo} />
-              <Text style={styles.logoText}>FairTrade</Text>
-            </View>
-            <View style={styles.headerRight}>
-              <TouchableOpacity style={styles.notificationButton}>
-                <Ionicons name="notifications-outline" size={20} color={theme.textSecondary} />
-                <View style={styles.notificationBadge} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[
-                  styles.profileContainer,
-                  isElementHighlighted('profile') && styles.highlightedElement
-                ]}
-                onPress={() => router.push('/profile')}
-              >
-                <Image 
-                  source={{ uri: profileImage }} 
-                  style={styles.profilePic} 
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
           {/* Greeting with Animated Hand Wave */}
-          <View style={styles.greetingContainer}>
-            <Text style={styles.greeting}>Hi, Welcome</Text>
-            <AnimatedHandWave />
+          <View style={styles.greetingRow}>
+            <View style={styles.greetingContainer}>
+              <Text style={styles.greeting}>Hi, Welcome</Text>
+              <AnimatedHandWave />
+            </View>
+            
+            <TouchableOpacity 
+              style={[
+                styles.profileContainer,
+                isElementHighlighted('profile') && styles.highlightedElement
+              ]}
+              onPress={() => router.push('/profile')}
+            >
+              <Image 
+                source={{ uri: profileImage }} 
+                style={styles.profilePic} 
+              />
+            </TouchableOpacity>
           </View>
           <Text style={styles.subGreeting}>Find your favorite deals</Text>
 
@@ -641,7 +644,7 @@ const ProductCard = ({ product, addToCart }) => {
             <View style={styles.searchBar}>
               <Ionicons name="search-outline" size={20} color={theme.textTertiary} style={styles.searchIconLeft} />
               <TextInput
-                placeholder="Search products or services"
+                placeholder="Search Product"
                 placeholderTextColor={theme.textTertiary}
                 style={styles.searchInput}
                 value={searchQuery}
@@ -715,7 +718,7 @@ const ProductCard = ({ product, addToCart }) => {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>
               {selectedCategory === 'Home' ? 'Popular Items' : selectedCategory}
-              {/* NEW: Show count of user products if any */}
+              {/* Show count of user products if any */}
               {userProducts.length > 0 && selectedCategory === 'Home' && (
                 <Text style={styles.newProductsCount}> ({userProducts.length} new)</Text>
               )}
@@ -731,7 +734,6 @@ const ProductCard = ({ product, addToCart }) => {
             keyExtractor={(item, index) =>
               item.isUserGenerated ? `user_${item.id}_${index}` : `prod_${item.id}_${index}`
             }
-
             numColumns={2}
             columnWrapperStyle={styles.productRow}
             showsVerticalScrollIndicator={false}
@@ -773,7 +775,7 @@ const ProductCard = ({ product, addToCart }) => {
 }
 
 // Dynamic styles function that uses theme
-const createStyles = (theme) => StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
   mainContainer: {
     flex: 1,
     backgroundColor: theme.background,
@@ -802,18 +804,32 @@ const createStyles = (theme) => StyleSheet.create({
     shadowOpacity: 0.8,
     shadowRadius: 15,
   },
-  header: {
+  header: { 
     paddingHorizontal: 20,
-    paddingTop: 50,
+    paddingTop: 40,
     paddingBottom: 10,
     backgroundColor: theme.background,
   },
   topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
+  position: 'absolute',  
+  top: 0,                
+  left: 0,               
+  right: 0,              
+  zIndex: 10,
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  paddingTop: 40,
+  paddingBottom: 15,
+  paddingHorizontal: 20,
+  borderBottomColor: theme.border,
+  backgroundColor: theme.background,
+},
+  rightSection: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 2,
+},
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -830,13 +846,12 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.text,
   },
   headerRight: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
   },
   notificationButton: {
     position: 'relative',
     padding: 8,
+    
   },
   notificationBadge: {
     position: 'absolute',
@@ -861,6 +876,13 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
+  greetingRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 4,
+  marginTop: 70
+},
   greeting: {
     fontSize: 28,
     fontWeight: '800',
@@ -917,7 +939,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: theme.text,
-    marginBottom: 6,
+    marginBottom: 12,
   },
   // NEW: Style for new products count
   newProductsCount: {
@@ -1011,9 +1033,9 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.card,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: theme.shadow.split('(')[0],
+    shadowColor: theme.shadow?.split('(')[0] || '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: theme.shadow.includes('0.1') ? 0.1 : 0.3,
+    shadowOpacity: theme.shadow?.includes('0.1') ? 0.1 : 0.3,
     shadowRadius: 8,
     elevation: 3,
     borderWidth: 1,
@@ -1053,7 +1075,6 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
-  // NEW: Badge for user-generated products
   newProductBadge: {
     position: 'absolute',
     top: 8,
@@ -1186,7 +1207,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     width: 280,
-    shadowColor: theme.shadow.split('(')[0],
+    shadowColor: theme.shadow?.split('(')[0] || '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
     shadowRadius: 20,

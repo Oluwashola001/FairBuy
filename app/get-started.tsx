@@ -162,10 +162,10 @@ const createStyles = (theme: any) => StyleSheet.create({
     opacity: 0.6,
   },
   header: {
-    paddingTop: 20,
+    paddingTop: 50,
     paddingHorizontal: 20,
     alignItems: 'center',
-    marginBottom: 35,
+    marginBottom: 45,
   },
   logoContainer: {
     flexDirection: 'row',
@@ -226,13 +226,13 @@ const createStyles = (theme: any) => StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
     paddingHorizontal: 16,
-    marginBottom: 48,
+    marginBottom: 24,
   },
   paginationContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 30,
   },
   paginationDot: {
     width: 8,
@@ -259,7 +259,7 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   buttonContainer: {
     paddingHorizontal: 20,
-    paddingBottom: 70,
+    paddingBottom: 50,
   },
   getStartedButton: {
     backgroundColor: '#4B56E9',

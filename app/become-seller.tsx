@@ -1,9 +1,10 @@
 // app/become-seller.tsx
+import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useState } from "react";
 import {
+  Alert,
   FlatList,
   Modal,
   SafeAreaView,
@@ -13,7 +14,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { useTheme } from './contexts/ThemeContext';
 
@@ -41,7 +42,9 @@ export default function BecomeSellerScreen() {
   const [bankName, setBankName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolder, setAccountHolder] = useState("");
+  
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleCategorySelect = (selectedCategory: string) => {
     setCategory(selectedCategory);
@@ -49,23 +52,49 @@ export default function BecomeSellerScreen() {
   };
 
   const handleContinue = async () => {
+    // Basic validation
+    if (!storeName.trim() || !category) {
+      Alert.alert("Missing Info", "Please provide at least a Store Name and Category.");
+      return;
+    }
+
     try {
-      const sellerData = {
-        storeName,
-        businessInfo,
-        category,
-        joinedDate: new Date().toISOString(),
-      };
+      setIsSubmitting(true);
 
-      // Save the seller profile data
-      await AsyncStorage.setItem("sellerProfile", JSON.stringify(sellerData));
+      // 1. Ensure the user is actually logged in
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert("Authentication Required", "You must be logged in to become a seller.");
+        router.replace('/auth/login');
+        return;
+      }
 
-      console.log("Seller Profile Data saved:", sellerData);
+      // 2. Save all the seller data directly to their Supabase user metadata!
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          isSeller: true, // Helpful flag we can use later
+          storeName,
+          businessInfo,
+          category,
+          bankName,
+          accountNumber,
+          accountHolder,
+          sellerJoinedDate: new Date().toISOString(),
+        }
+      });
 
-      // Navigate to profile screen
+      if (error) throw error;
+
+      console.log("Seller Profile Data saved securely to Supabase!");
+
+      // 3. Navigate to their shiny new synced profile screen
       router.push("/(seller)/profile"); 
-    } catch (error) {
+      
+    } catch (error: any) {
       console.error("Error saving seller data:", error);
+      Alert.alert("Error", error.message || "Failed to create seller profile.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -86,6 +115,7 @@ export default function BecomeSellerScreen() {
         barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor={theme.background}
       />
+      
       <ScrollView 
         style={styles.container} 
         contentContainerStyle={styles.scrollContainer}
@@ -109,12 +139,13 @@ export default function BecomeSellerScreen() {
               onChangeText={setStoreName}
               style={styles.input}
               placeholderTextColor={theme.textTertiary}
+              editable={!isSubmitting}
             />
           </View>
 
           {/* Business Info */}
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Business Info(Optional)</Text>
+            <Text style={styles.label}>Business Info (Optional)</Text>
             <TextInput
               placeholder="What do you sell?"
               value={businessInfo}
@@ -123,6 +154,7 @@ export default function BecomeSellerScreen() {
               placeholderTextColor={theme.textTertiary}
               multiline
               numberOfLines={4}
+              editable={!isSubmitting}
             />
           </View>
 
@@ -131,7 +163,8 @@ export default function BecomeSellerScreen() {
             <Text style={styles.label}>Category</Text>
             <TouchableOpacity 
               style={styles.dropdown}
-              onPress={() => setShowCategoryModal(true)}
+              onPress={() => !isSubmitting && setShowCategoryModal(true)}
+              activeOpacity={isSubmitting ? 1 : 0.7}
             >
               <Text style={[
                 styles.dropdownText, 
@@ -147,11 +180,12 @@ export default function BecomeSellerScreen() {
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Bank Name</Text>
             <TextInput
-              placeholder=""
+              placeholder="e.g. Chase Bank"
               value={bankName}
               onChangeText={setBankName}
               style={styles.input}
               placeholderTextColor={theme.textTertiary}
+              editable={!isSubmitting}
             />
           </View>
 
@@ -166,6 +200,7 @@ export default function BecomeSellerScreen() {
               placeholderTextColor={theme.textTertiary}
               secureTextEntry
               keyboardType="numeric"
+              editable={!isSubmitting}
             />
           </View>
 
@@ -173,11 +208,12 @@ export default function BecomeSellerScreen() {
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Account Holder Name</Text>
             <TextInput
-              placeholder=""
+              placeholder="e.g. John Doe"
               value={accountHolder}
               onChangeText={setAccountHolder}
               style={styles.input}
               placeholderTextColor={theme.textTertiary}
+              editable={!isSubmitting}
             />
           </View>
 
@@ -188,14 +224,21 @@ export default function BecomeSellerScreen() {
 
           {/* Continue Button */}
           <TouchableOpacity 
-            style={styles.primaryButton}
+            style={[styles.primaryButton, isSubmitting && { opacity: 0.7 }]}
             onPress={handleContinue}
+            disabled={isSubmitting}
           >
-            <Text style={styles.primaryButtonText}>Continue to Profile</Text>
+            <Text style={styles.primaryButtonText}>
+              {isSubmitting ? "Setting up Store..." : "Continue to Profile"}
+            </Text>
           </TouchableOpacity>
 
           {/* Back to Buyer Mode */}
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/(tabs)/home')}>
+          <TouchableOpacity 
+            style={styles.secondaryButton} 
+            onPress={() => router.push('/(tabs)/home')}
+            disabled={isSubmitting}
+          >
             <Text style={styles.secondaryButtonText}>Back to Buyer Mode</Text>
           </TouchableOpacity>
         </View>
@@ -234,7 +277,7 @@ export default function BecomeSellerScreen() {
   );
 }
 
-const createStyles = (theme) => StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: theme.background,
@@ -248,7 +291,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   headerContainer: {
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 45,
     paddingBottom: 30,
   },
   header: {

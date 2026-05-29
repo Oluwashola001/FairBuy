@@ -8,13 +8,25 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#4B56E9",
+      "resizeMode": "contain"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "splash": {
+        "backgroundColor": "#ffffff",
+        "resizeMode": "contain"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
+      },
+      "splash": {
+        "backgroundColor": "#ffffff",
+        "resizeMode": "contain"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.henrywalkerme.myapp"
@@ -26,15 +38,15 @@
     },
     "plugins": [
       "expo-router",
+      "expo-splash-screen",
+      "expo-web-browser",
       [
-        "expo-splash-screen",
+        "expo-camera",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take product photos."
         }
       ]
+      
     ],
     "experiments": {
       "typedRoutes": true

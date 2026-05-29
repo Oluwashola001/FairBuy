@@ -1,7 +1,10 @@
+// app/auth/signup.tsx
 import { supabase } from '@/lib/supabase';
 import CheckBox from 'expo-checkbox';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useState } from 'react';
 import {
   Alert, Dimensions, Image,
@@ -16,6 +19,9 @@ const brandColor = '#4B56E9';
 const inputWidth = 320;
 const { height: screenHeight } = Dimensions.get('window');
 
+// CRITICAL: Required by Expo to properly close the browser after logging in
+WebBrowser.maybeCompleteAuthSession();
+
 export default function SignupScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -23,36 +29,81 @@ export default function SignupScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { theme } = useTheme();
+  
+  // Added isDark to easily check the theme status for Expo's StatusBar
+  const { theme, isDark } = useTheme();
 
   const handleSignup = async () => {
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-    emailRedirectTo: 'exp://192.168.43.147:8081/--/auth/verified', 
-  },
-  });
-
-  if (error) {
-    Alert.alert(error.message);
-  } else {
-    Alert.alert(
-      'Check your email for a verification link!',
-      'Click the link to activate your account.'
-    );
-    router.push({
-      pathname: '/auth/verify',
-      params: { email },
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter both email and password.');
+      return;
+    }
+    
+    setLoading(true);
+    
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
     });
-  }
-};
+
+    setLoading(false);
+
+    if (error) {
+      Alert.alert('Signup Failed', error.message);
+    } else {
+      // Send them straight to the verification screen to type in the code
+      router.push({
+        pathname: '/auth/verify',
+        params: { email },
+      });
+    }
+  };
 
   const handleGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
+    // Generate the deep link to route back to your app
+    const redirectUrl = Linking.createURL('/auth/callback');
+    
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+        skipBrowserRedirect: true, // CRITICAL: Stops it from crashing in React Native
+      }
     });
-    if (error) Alert.alert(error.message);
+    
+    if (error) {
+      Alert.alert('Google Login Failed', error.message);
+      return;
+    }
+
+    if (data?.url) {
+      // Manually pop open the secure browser
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      
+      // Catch the successful login redirect!
+      if (result.type === 'success' && result.url) {
+        // Extract the secure tokens from the URL hash
+        const hashPart = result.url.split('#')[1];
+        if (hashPart) {
+          const params = hashPart.split('&').reduce((acc, current) => {
+            const [key, value] = current.split('=');
+            acc[key] = value;
+            return acc;
+          }, {} as Record<string, string>);
+
+          // If we got the tokens, log the user into the Supabase session
+          if (params.access_token && params.refresh_token) {
+            await supabase.auth.setSession({
+              access_token: params.access_token,
+              refresh_token: params.refresh_token,
+            });
+            
+            // Success! Send them to the marketplace!
+            router.replace('/(tabs)/home');
+          }
+        }
+      }
+    }
   };
 
   const styles = createStyles(theme);
@@ -64,9 +115,9 @@ export default function SignupScreen() {
       keyboardShouldPersistTaps="handled"
       bounces={true}
     >
-      <StatusBar style={theme.statusBar} />
+      {/* Fixed TypeScript error by mapping to Expo's expected string values */}
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       
-      {/* Top spacing to allow scrolling up */}
       <View style={styles.topSpacer} />
       
       <View style={styles.contentContainer}>
@@ -134,7 +185,6 @@ export default function SignupScreen() {
         </TouchableOpacity>
       </View>
       
-      {/* Bottom spacing for comfortable scrolling */}
       <View style={styles.bottomSpacer} />
     </ScrollView>
   );

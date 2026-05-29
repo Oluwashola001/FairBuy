@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
@@ -8,12 +10,15 @@ import { useTheme } from '../contexts/ThemeContext';
 const brandColor = '#4B56E9';
 const inputWidth = 320;
 
+// CRITICAL: Required by Expo to properly close the browser after logging in
+WebBrowser.maybeCompleteAuthSession();
+
 export default function LoginScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   
   // Animation ref for the breathing effect
   const breathingAnimation = useRef(new Animated.Value(1)).current;
@@ -23,61 +28,74 @@ export default function LoginScreen() {
     const breathe = () => {
       Animated.sequence([
         Animated.timing(breathingAnimation, {
-          toValue: 1.8, // Scale up to 105%
-          duration: 2000, // 2 seconds to expand
+          toValue: 1.8, 
+          duration: 2000, 
           useNativeDriver: true,
         }),
         Animated.timing(breathingAnimation, {
-          toValue: 1, // Scale back to normal
-          duration: 2000, // 2 seconds to contract
+          toValue: 1, 
+          duration: 2000, 
           useNativeDriver: true,
         }),
       ]).start(() => {
-        breathe(); // Loop the animation continuously
+        breathe(); 
       });
     };
 
-    breathe(); // Start the first breath
+    breathe(); 
   }, [breathingAnimation]);
 
-  // Create the breathing transform
   const breathingTransform = {
-    transform: [
-      {
-        scale: breathingAnimation,
-      },
-    ],
+    transform: [{ scale: breathingAnimation }],
   };
 
   const handleLogin = async () => {
-  try {
-    setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      setLoading(false);
 
-    if (error) {
-      Alert.alert('Login Failed', error.message);
-    } else if (data.user && data.session) {
-      router.replace('/(tabs)/home'); // ✅ Ensures login was successful before navigating
-    } else {
-      Alert.alert('Login Failed', 'Unexpected login response. Please try again.');
+      if (error) {
+        Alert.alert('Login Failed', error.message);
+      } else if (data.user && data.session) {
+        router.replace('/(tabs)/home'); 
+      } else {
+        Alert.alert('Login Failed', 'Unexpected login response. Please try again.');
+      }
+    } catch (err) {
+      setLoading(false);
+      Alert.alert('Error', 'Something went wrong. Please try again later.');
     }
-  } catch (err) {
-    setLoading(false);
-    Alert.alert('Error', 'Something went wrong. Please try again later.');
-  }
-};
+  };
 
   const handleGoogleLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-    if (error) Alert.alert('Google Login Failed', error.message);
+    // Generate the deep link to route back to your app
+    const redirectUrl = Linking.createURL('/auth/callback');
+    
+    const { data, error } = await supabase.auth.signInWithOAuth({ 
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+        skipBrowserRedirect: true, // CRITICAL: Stops it from crashing in React Native
+      }
+    });
+    
+    if (error) {
+      Alert.alert('Google Login Failed', error.message);
+      return;
+    }
+
+    if (data?.url) {
+      // Manually pop open the secure browser
+      await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+    }
   };
 
   const styles = createStyles(theme);
 
   return (
     <View style={styles.container}>
-      <StatusBar style={theme.statusBar} />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       
       {/* Logo + Brand Name with Breathing Animation */}
       <View style={styles.logoContainer}>
@@ -114,6 +132,11 @@ export default function LoginScreen() {
         <Text style={styles.loginButtonText}>{loading ? 'Logging in...' : 'Log In'}</Text>
       </TouchableOpacity>
 
+      {/* Forgot Password Button */}
+      <TouchableOpacity onPress={() => router.push('/auth/reset-password')} style={styles.forgotPasswordContainer}>
+        <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity onPress={() => router.push('/auth/signup')} style={styles.signupContainer}>
         <Text style={styles.signupText}>Create an account</Text>
       </TouchableOpacity>
@@ -125,7 +148,6 @@ export default function LoginScreen() {
         </View>
       </TouchableOpacity>
       
-      {/* Bottom spacing for clean look */}
       <View style={styles.bottomSpace} />
     </View>
   );
@@ -209,6 +231,15 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
     letterSpacing: 0.2,
+  },
+  forgotPasswordContainer: {
+    marginBottom: 16,
+    paddingVertical: 4,
+  },
+  forgotPasswordText: {
+    color: brandColor,
+    fontSize: 14,
+    fontWeight: '600',
   },
   signupContainer: {
     marginBottom: 12,

@@ -2,12 +2,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 
 const brandColor = "#4B56E9";
 
 export default function SellerLayout() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -15,13 +17,17 @@ export default function SellerLayout() {
         tabBarActiveTintColor: brandColor,
         tabBarInactiveTintColor: theme.textSecondary,
         tabBarStyle: {
-          backgroundColor: theme.card,
-          borderTopWidth: 1,
+          backgroundColor: theme.background,
+          borderTopWidth: 0.1,
           borderTopColor: theme.border,
-          height: Platform.OS === 'ios' ? 85 : 70,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+          height: Platform.OS === 'ios' ? 85 : 70 + insets.bottom,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 10 + insets.bottom,
           paddingTop: 8,
-          ...theme.shadow,
+          shadowColor: theme.shadow.split('(')[0],
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: theme.shadow.includes('0.1') ? 0.1 : 0.3,
+          shadowRadius: 8,
+          elevation: 8,
         },
         tabBarLabelStyle: {
           fontSize: 12,
@@ -63,6 +69,7 @@ export default function SellerLayout() {
         name="chat"
         options={{
           title: 'Chat',
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons 
               name={focused ? 'chatbubbles' : 'chatbubbles-outline'} 

@@ -1,8 +1,8 @@
 // app/(seller)/profile.tsx
+import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   Image,
   SafeAreaView,
@@ -34,27 +34,35 @@ export default function SellerProfile() {
     joinedDate: "",
   });
 
-  // Load seller data from AsyncStorage
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        // Load profile image (shared with buyer profile)
-        const storedImage = await AsyncStorage.getItem("profileImage");
-        if (storedImage) setProfileImage(storedImage);
+  // CRITICAL FIX: useFocusEffect makes sure data reloads EVERY time this screen is viewed!
+  useFocusEffect(
+    useCallback(() => {
+      const loadData = async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          if (user) {
+            // Load profile image (shared with buyer profile)
+            if (user.user_metadata?.avatar_url) {
+              setProfileImage(user.user_metadata.avatar_url);
+            }
 
-        // Load seller details from the saved seller profile
-        const storedSellerData = await AsyncStorage.getItem("sellerProfile");
-        if (storedSellerData) {
-          const parsedData: SellerData = JSON.parse(storedSellerData);
-          setSellerData(parsedData);
+            // Load seller details from user_metadata exactly as saved in edit-store.tsx
+            setSellerData({
+              storeName: user.user_metadata?.storeName || "",
+              businessInfo: user.user_metadata?.businessInfo || "",
+              category: user.user_metadata?.category || "",
+              joinedDate: user.created_at || new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          console.error("Error loading seller profile:", error);
         }
-      } catch (error) {
-        console.error("Error loading seller profile:", error);
-      }
-    };
+      };
 
-    loadData();
-  }, []);
+      loadData();
+    }, [])
+  );
 
   // Format joined date
   const formatJoinedDate = (dateString: string) => {
@@ -69,20 +77,30 @@ export default function SellerProfile() {
     return `${monthNames[date.getMonth()]}, ${date.getFullYear()}`;
   };
 
+  const handleMenuPress = async (item: any) => {
+    if (item.label === "Logout") {
+      // Actually sign them out of the database!
+      await supabase.auth.signOut();
+      router.replace(item.route);
+    } else {
+      router.push(item.route);
+    }
+  };
+
   const menuItems = [
     { 
       label: "Edit Store Info", 
       icon: "create-outline", 
       route: "/seller-profile-details/edit-store",
       iconBg: "#FF6B35",
-      bgColor: isDark ? "rgba(255, 107, 53, 0.15)" : "#FFF4F2"
+      bgColor: isDark ? "rgba(102, 102, 102, 0.15)" : "#F5F5F5"
     },
     { 
       label: "Update Bank Details", 
       icon: "card-outline", 
       route: "/seller-profile-details/bank-details",
       iconBg: "#4B56E9",
-      bgColor: isDark ? "rgba(75, 86, 233, 0.15)" : "#F4F5FF"
+      bgColor: isDark ? "rgba(102, 102, 102, 0.15)" : "#F5F5F5"
     },
     { 
       label: "Settings", 
@@ -96,14 +114,14 @@ export default function SellerProfile() {
       icon: "swap-horizontal-outline", 
       route: "/(tabs)/profile",
       iconBg: "#00C851",
-      bgColor: isDark ? "rgba(0, 200, 81, 0.15)" : "#F1FFF4"
+      bgColor: isDark ? "rgba(102, 102, 102, 0.15)" : "#F5F5F5"
     },
     { 
       label: "Help & Support", 
       icon: "help-circle-outline", 
       route: "/help",
       iconBg: "#FF9500",
-      bgColor: isDark ? "rgba(255, 149, 0, 0.15)" : "#FFF8F0"
+      bgColor: isDark ? "rgba(102, 102, 102, 0.15)" : "#F5F5F5"
     },
     { 
       label: "Logout", 
@@ -111,7 +129,7 @@ export default function SellerProfile() {
       route: "/auth/login", 
       danger: true,
       iconBg: "#FF3B30",
-      bgColor: isDark ? "rgba(255, 59, 48, 0.15)" : "#FFF2F2"
+      bgColor: isDark ? "rgba(102, 102, 102, 0.15)" : "#F5F5F5"
     },
   ];
 
@@ -120,8 +138,7 @@ export default function SellerProfile() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={theme.statusBar} backgroundColor={theme.background} />
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header with back button */}
+      {/* Header with back button */}
         <View style={styles.headerContainer}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={theme.text} />
@@ -129,6 +146,8 @@ export default function SellerProfile() {
           <Text style={styles.header}>My Seller Profile</Text>
           <View style={styles.placeholder} />
         </View>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        
 
         {/* Profile Card */}
         <View style={styles.profileCard}>
@@ -178,7 +197,7 @@ export default function SellerProfile() {
                 styles.menuItem,
                 { backgroundColor: item.bgColor }
               ]}
-              onPress={() => router.push(item.route)}
+              onPress={() => handleMenuPress(item)}
             >
               <View style={[styles.iconContainer, { backgroundColor: item.iconBg }]}>
                 <Ionicons
@@ -223,7 +242,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 20,
-    paddingTop: 10,
+    paddingTop: 40,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    borderBottomColor: theme.border,
+    backgroundColor: theme.background,
   },
   backBtn: {
     width: 32,
@@ -244,10 +267,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     width: 32,
   },
   profileCard: {
-    backgroundColor: theme.surface,
+    backgroundColor: theme.background,
     borderRadius: 16,
     padding: 20,
     marginBottom: 30,
+    marginTop: 16,
     alignItems: "flex-start",
     borderWidth: 1,
     borderColor: theme.border,

@@ -1,7 +1,6 @@
 // app/products/add-product.tsx
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -26,12 +25,12 @@ import { useTheme } from '../contexts/ThemeContext';
 const { width } = Dimensions.get('window');
 const brandColor = '#4B56E9';
 
-// Categories matching your home screen exactly (excluding 'Home' as it's not a product category)
+// Categories matching your home screen exactly
 const categories = ['Electronic', 'Fashion', 'Beauty', 'Health', 'Sports', 'Fitness', 'Appliance', 'Jewelry', 'Furniture', 'Gaming'];
 
 export default function AddProductScreen() {
   const router = useRouter();
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   
   // Form state
   const [productName, setProductName] = useState('');
@@ -47,10 +46,9 @@ export default function AddProductScreen() {
   // Create dynamic styles
   const styles = createStyles(theme);
 
-  // Image picker function - FIXED TO SAVE PERMANENTLY!
+  // Simplified Image Picker - Just get the URI to preview, upload happens on submit
   const pickImage = async () => {
     try {
-      // Request permission first
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (permissionResult.granted === false) {
@@ -62,38 +60,16 @@ export default function AddProductScreen() {
         return;
       }
 
-      // Launch image picker with updated options
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 0.5, // Compress to save bandwidth
         allowsMultipleSelection: false,
       });
 
-      console.log('Image picker result:', result); // Debug log
-
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const selectedImage = result.assets[0];
-        console.log('Selected image URI (temporary):', selectedImage.uri);
-        
-        // COPY IMAGE TO PERMANENT STORAGE
-        try {
-          const fileName = `product_image_${Date.now()}.jpeg`;
-          const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
-          
-          await FileSystem.copyAsync({
-            from: selectedImage.uri,
-            to: permanentUri,
-          });
-          
-          console.log('Image copied to permanent location:', permanentUri);
-          setProductImage(permanentUri);
-          
-        } catch (copyError) {
-          console.error('Error copying image:', copyError);
-          Alert.alert('Error', 'Failed to save image. Please try again.');
-        }
+        setProductImage(result.assets[0].uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -127,73 +103,73 @@ export default function AddProductScreen() {
       Alert.alert('Validation Error', 'Please enter delivery method.');
       return false;
     }
+    if (!productImage) {
+      Alert.alert('Validation Error', 'Please select a product image.');
+      return false;
+    }
     return true;
   };
 
-  // Generate unique ID for product
-  const generateProductId = () => {
-    return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  };
-
-  // Save product function - UPDATED TO NAVIGATE TO SUCCESS SCREEN!
+  // Save product directly to Supabase
   const handleAddProduct = async () => {
     if (!validateForm()) return;
 
     setIsSubmitting(true);
     
     try {
-      // Create product object
-      const newProduct = {
-        id: generateProductId(),
-        name: productName.trim(),
-        description: description.trim(),
-        price: parseFloat(price),
-        category: selectedCategory,
-        image: productImage,
-        quantity: parseInt(quantity),
-        deliveryMethod: deliveryMethod.trim(),
-        rating: 0, // New products start with 0 rating
-        reviews: 0, // New products start with 0 reviews
-        discount: 0, // No discount for new products initially
-        dateAdded: new Date().toISOString(),
-        isUserGenerated: true, // Flag to identify user-generated products
-        // Additional details for product details screen
-        specifications: {
-          // You can expand this later
-          quantity: parseInt(quantity),
-          delivery: deliveryMethod.trim()
-        },
-        sellerInfo: {
-          // You can add seller info later when you implement user authentication
-          sellerId: 'current_user', // Placeholder
-          addedDate: new Date().toISOString()
-        }
-      };
+      // 1. Check Auth state
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("You must be logged in as a seller to add products.");
 
-      // Get existing products from AsyncStorage
-      const existingProductsJson = await AsyncStorage.getItem('userProducts');
-      const existingProducts = existingProductsJson ? JSON.parse(existingProductsJson) : [];
+      // 2. Upload the Image to Supabase Storage
+      const response = await fetch(productImage!);
+      const blob = await response.blob();
+      const arrayBuffer = await new Response(blob).arrayBuffer();
+      
+      const fileExt = productImage!.split('.').pop() || 'jpeg';
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
 
-      // Add new product to the beginning of the array (higher priority)
-      const updatedProducts = [newProduct, ...existingProducts];
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(fileName, arrayBuffer, {
+          contentType: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
+        });
 
-      // Save back to AsyncStorage
-      await AsyncStorage.setItem('userProducts', JSON.stringify(updatedProducts));
+      if (uploadError) throw uploadError;
 
-      console.log('Product saved successfully:', newProduct); // Debug log
+      const { data: { publicUrl } } = supabase.storage
+        .from('product-images')
+        .getPublicUrl(fileName);
 
-      // Navigate to success screen instead of showing alert
+      // 3. Save the actual product details into the Database
+      const { error: dbError } = await supabase
+        .from('products')
+        .insert([
+          {
+            name: productName.trim(),
+            description: description.trim(),
+            price: parseFloat(price),
+            category: selectedCategory,
+            image_url: publicUrl,
+            quantity: parseInt(quantity),
+            delivery_method: deliveryMethod.trim(),
+            seller_id: user.id, // Link this product to the seller
+          }
+        ]);
+
+      if (dbError) throw dbError;
+
+      // 4. Navigate to success screen!
       router.push('./product-added-successfully');
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving product:', error);
-      Alert.alert('Error', 'Failed to save product. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to save product. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // IMPROVED Category Dropdown - Now Scrollable!
   const CategoryDropdown = () => (
     showCategoryDropdown && (
       <View style={styles.dropdown}>
@@ -225,7 +201,7 @@ export default function AddProductScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style={theme.statusBar} />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       
       {/* Header */}
       <View style={styles.header}>
@@ -253,7 +229,7 @@ export default function AddProductScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {/* Image Upload */}
-          <TouchableOpacity style={styles.imageUploadContainer} onPress={pickImage}>
+          <TouchableOpacity style={styles.imageUploadContainer} onPress={pickImage} disabled={isSubmitting}>
             {productImage ? (
               <View style={styles.imagePreviewContainer}>
                 <Image source={{ uri: productImage }} style={styles.imagePreview} />
@@ -280,6 +256,7 @@ export default function AddProductScreen() {
               value={productName}
               onChangeText={setProductName}
               returnKeyType="next"
+              editable={!isSubmitting}
             />
           </View>
 
@@ -288,7 +265,7 @@ export default function AddProductScreen() {
             <Text style={styles.label}>Category</Text>
             <TouchableOpacity 
               style={styles.categorySelector}
-              onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+              onPress={() => !isSubmitting && setShowCategoryDropdown(!showCategoryDropdown)}
             >
               <Text style={[
                 styles.categorySelectorText, 
@@ -317,6 +294,7 @@ export default function AddProductScreen() {
               multiline
               numberOfLines={4}
               textAlignVertical="top"
+              editable={!isSubmitting}
             />
           </View>
 
@@ -332,6 +310,7 @@ export default function AddProductScreen() {
                 onChangeText={setPrice}
                 keyboardType="numeric"
                 returnKeyType="next"
+                editable={!isSubmitting}
               />
             </View>
 
@@ -345,6 +324,7 @@ export default function AddProductScreen() {
                 onChangeText={setQuantity}
                 keyboardType="numeric"
                 returnKeyType="next"
+                editable={!isSubmitting}
               />
             </View>
           </View>
@@ -359,6 +339,7 @@ export default function AddProductScreen() {
               value={deliveryMethod}
               onChangeText={setDeliveryMethod}
               returnKeyType="done"
+              editable={!isSubmitting}
             />
           </View>
 
@@ -369,11 +350,10 @@ export default function AddProductScreen() {
             disabled={isSubmitting}
           >
             <Text style={styles.addButtonText}>
-              {isSubmitting ? 'Adding Product...' : 'Add Product'}
+              {isSubmitting ? 'Uploading Product...' : 'Add Product'}
             </Text>
           </TouchableOpacity>
 
-          {/* Bottom Spacing for comfortable scrolling */}
           <View style={{ height: 120 }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -381,8 +361,7 @@ export default function AddProductScreen() {
   );
 }
 
-// Dynamic styles function
-const createStyles = (theme) => StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.background,
@@ -416,14 +395,14 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.text,
   },
   headerSpacer: {
-    width: 40, // Same width as back button for centering
+    width: 40, 
   },
   content: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 40, // Extra padding at bottom for comfortable scrolling
+    paddingBottom: 40,
   },
   imageUploadContainer: {
     alignSelf: 'center',
@@ -519,7 +498,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.border,
     zIndex: 1000,
     maxHeight: 200,
-    shadowColor: theme.shadow.split('(')[0],
+    shadowColor: theme.shadow?.split('(')[0] || '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -535,7 +514,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderBottomColor: theme.border,
   },
   lastDropdownItem: {
-    borderBottomWidth: 0, // Remove border from last item
+    borderBottomWidth: 0,
   },
   dropdownItemText: {
     fontSize: 16,

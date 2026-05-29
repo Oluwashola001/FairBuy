@@ -6,7 +6,7 @@ import React from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
-import Toast from 'react-native-toast-message'; // <-- import toast
+import Toast from 'react-native-toast-message';
 import { CartProvider } from './contexts/CartContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 
@@ -22,9 +22,11 @@ export default function RootLayout() {
     <ThemeProvider>
       <CartProvider>
         <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack />
+          {/* 👇 Hide all headers globally */}
+          <Stack screenOptions={{ headerShown: false }} />
+          
           <StatusBar style="auto" />
-          <Toast /> {/* <-- add Toast component here */}
+          <Toast />
         </NavigationThemeProvider>
       </CartProvider>
     </ThemeProvider>

@@ -1,42 +1,43 @@
 // app/products/product-details.tsx
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Image,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
+import { useCart } from '../contexts/CartContext';
 import { useTheme } from '../contexts/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
 export default function ProductDetailsScreen() {
   const { theme, isDark } = useTheme();
+  const { addToCart } = useCart();
   const router = useRouter();
   const params = useLocalSearchParams();
 
-  console.log('Raw params:', params);
-  
-  // Get product details from navigation params - FIXED ORDER
-  let product = null;
+  // Safely parse the product from navigation params
+  let product: any = null;
   try {
-    product = params.product ? JSON.parse(params.product) : null;
-    console.log('Parsed product:', product);
+    product = params.product ? JSON.parse(params.product as string) : null;
   } catch (error) {
     console.error('Error parsing product:', error);
   }
   
-  console.log('Product exists:', !!product);
-  
   const [isFavorite, setIsFavorite] = useState(false);
-  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [isStartingChat, setIsStartingChat] = useState(false);
 
   if (!product) {
     return (
@@ -46,10 +47,10 @@ export default function ProductDetailsScreen() {
           <Ionicons name="alert-circle-outline" size={80} color={theme.textSecondary} />
           <Text style={createStyles(theme).errorText}>Product not found</Text>
           <TouchableOpacity 
-            style={createStyles(theme).backButton}
+            style={createStyles(theme).backButtonError}
             onPress={() => router.back()}
           >
-            <Text style={createStyles(theme).backButtonText}>Go Back</Text>
+            <Text style={createStyles(theme).backButtonTextError}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -57,101 +58,151 @@ export default function ProductDetailsScreen() {
   }
 
   const handleAddToCart = () => {
-    Alert.alert(
-      'Added to Cart!',
-      `${product.name} has been added to your cart.`,
-      [{ text: 'OK', onPress: () => {} }]
-    );
+    try {
+      addToCart(product);
+      Alert.alert(
+        'Added to Cart!',
+        `${product.name} has been added to your cart.`,
+        [{ text: 'OK', onPress: () => {} }]
+      );
+    } catch (err) {
+      console.error('Error adding to cart:', err);
+      Alert.alert('Error', 'Could not add item to cart.');
+    }
   };
 
-  const handleBuyNow = () => {
-    Alert.alert(
-      'Buy Now',
-      `Proceeding to checkout for ${product.name}`,
-      [{ text: 'OK', onPress: () => {} }]
-    );
+  // Secure Chat Logic connecting to your database tables
+  const handleChatWithSeller = async () => {
+    if (!product.seller_id) {
+      Alert.alert('Notice', 'This is a system product, you cannot chat with a seller.');
+      return;
+    }
+    
+    try {
+      setIsStartingChat(true);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        Alert.alert('Login Required', 'You must be logged in to message the seller.');
+        router.push('/auth/login');
+        return;
+      }
+
+      if (user.id === product.seller_id) {
+        Alert.alert('Notice', 'You cannot message yourself about your own product!');
+        return;
+      }
+
+      // 1. Check if a conversation already exists
+      const { data: existingConversations, error: fetchError } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('buyer_id', user.id)
+        .eq('seller_id', product.seller_id)
+        .limit(1);
+
+      if (fetchError) throw fetchError;
+
+      let conversationId;
+
+      if (existingConversations && existingConversations.length > 0) {
+        // Resume existing chat
+        conversationId = existingConversations[0].id;
+      } else {
+        // 2. Create a new conversation room
+        const { data: newConvo, error: insertError } = await supabase
+          .from('conversations')
+          .insert({
+            buyer_id: user.id,
+            seller_id: product.seller_id,
+            product_id: product.id // Attach context of what they are talking about
+          })
+          .select('id')
+          .single();
+
+        if (insertError) throw insertError;
+        conversationId = newConvo.id;
+      }
+
+      // 3. Jump to the real-time chat room we built!
+      router.push({
+        pathname: '/chat-room',
+        params: {
+          conversationId: conversationId,
+          recipientId: product.seller_id,
+          recipientNameParam: "Seller", 
+        }
+      });
+
+    } catch (err: any) {
+      console.error('Error opening chat:', err);
+      Alert.alert('Error', 'Could not connect to the seller right now. Please try again.');
+    } finally {
+      setIsStartingChat(false);
+    }
   };
 
-  const toggleFavorite = () => {
-    setIsFavorite(!isFavorite);
-  };
+  const toggleFavorite = () => setIsFavorite(!isFavorite);
 
   const styles = createStyles(theme);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style={isDark ? "light" : "dark"} />
+    <View style={styles.container}>
+      <StatusBar style="light" backgroundColor="transparent" translucent />
       
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.headerButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.text} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Product Details</Text>
-        
-        <TouchableOpacity 
-          style={styles.headerButton}
-          onPress={toggleFavorite}
-        >
-          <Ionicons 
-            name={isFavorite ? "heart" : "heart-outline"} 
-            size={24} 
-            color={isFavorite ? "#FF6B6B" : theme.text} 
-          />
-        </TouchableOpacity>
-      </View>
-
       <ScrollView 
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
-        bounces={true}
+        bounces={false}
       >
-        {/* Product Image */}
+        {/* Floating Header Actions (over the image) */}
+        <View style={styles.floatingHeader}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#000" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton} onPress={toggleFavorite}>
+            <Ionicons 
+              name={isFavorite ? "heart" : "heart-outline"} 
+              size={24} 
+              color={isFavorite ? "#EF4444" : "#000"} 
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Hero Image */}
         <View style={styles.imageContainer}>
-          {/* DEBUG LOGS FOR IMAGE */}
-          {console.log('Product image URI:', product.image)}
-          {console.log('Image URI type:', typeof product.image)}
-          {console.log('Image URI length:', product.image?.length)}
-          {console.log('Image exists check:', !!product.image)}
-          
           {product.image ? (
             <Image 
               source={{ uri: product.image }} 
               style={styles.productImage}
-              onError={(error) => {
-                console.log('Image load error:', error.nativeEvent.error);
-              }}
-              onLoad={() => {
-                console.log('Image loaded successfully');
-              }}
-              onLoadStart={() => {
-                console.log('Image loading started');
-              }}
             />
           ) : (
             <View style={styles.placeholderImage}>
-              <Ionicons name="image-outline" size={80} color={theme.textTertiary} />
-              <Text style={styles.placeholderText}>No Image</Text>
+              <Ionicons name="image-outline" size={80} color="#999" />
+              <Text style={{ color: '#999', marginTop: 10 }}>No Image Available</Text>
             </View>
           )}
           
-          {/* "NEW" Badge for user-generated products */}
-          {product.id && typeof product.id === 'string' && product.id.includes('user_') && (
+          {product.isUserGenerated && (
             <View style={styles.newBadge}>
               <Text style={styles.newBadgeText}>NEW</Text>
             </View>
           )}
         </View>
 
-        {/* Product Info */}
+        {/* Product Info - Overlapping Card */}
         <View style={styles.contentContainer}>
-          {/* Title and Price */}
-          <View style={styles.titleContainer}>
-            <Text style={styles.productName}>{product.name}</Text>
+          <View style={styles.titleRow}>
+            <View style={styles.titleWrapper}>
+              <Text style={styles.productName}>{product.name}</Text>
+              <View style={styles.ratingContainer}>
+                <Ionicons name="star" size={16} color="#F59E0B" />
+                <Text style={styles.ratingText}>
+                  {product.rating || "5.0"} <Text style={styles.reviewsText}>({product.reviews || "12"} reviews)</Text>
+                </Text>
+              </View>
+            </View>
             <View style={styles.priceContainer}>
               <Text style={styles.price}>${product.price}</Text>
               {product.discount > 0 && (
@@ -162,167 +213,155 @@ export default function ProductDetailsScreen() {
             </View>
           </View>
 
-          {/* Rating and Reviews */}
-          <View style={styles.ratingContainer}>
-            <View style={styles.starsContainer}>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <Ionicons
-                  key={star}
-                  name={star <= Math.floor(product.rating) ? "star" : "star-outline"}
-                  size={16}
-                  color="#FFD700"
-                />
-              ))}
-            </View>
-            <Text style={styles.ratingText}>
-              {product.rating} ({product.reviews} reviews)
+          {/* Description Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Overview</Text>
+            <Text style={styles.descriptionText}>
+              {product.description || "A premium product carefully selected for you. Discover exceptional quality and craftsmanship designed to elevate your everyday experience."}
             </Text>
           </View>
 
-          {/* Category */}
-          <View style={styles.categoryContainer}>
-            <Ionicons name="pricetag-outline" size={16} color={theme.textSecondary} />
-            <Text style={styles.categoryText}>{product.category}</Text>
+          {/* Quick Details Pills */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Specifications</Text>
+            <View style={styles.pillsContainer}>
+              <View style={styles.pill}>
+                <Ionicons name="pricetag-outline" size={16} color={theme.primary ?? "#4B56E9"} />
+                <Text style={styles.pillText}>{product.category}</Text>
+              </View>
+              {product.quantity !== undefined && (
+                <View style={styles.pill}>
+                  <Ionicons name="cube-outline" size={16} color={theme.primary ?? "#4B56E9"} />
+                  <Text style={styles.pillText}>Stock: {product.quantity}</Text>
+                </View>
+              )}
+              {product.delivery_method && (
+                <View style={styles.pill}>
+                  <Ionicons name="car-outline" size={16} color={theme.primary ?? "#4B56E9"} />
+                  <Text style={styles.pillText}>{product.delivery_method}</Text>
+                </View>
+              )}
+            </View>
           </View>
 
-          {/* Description - Only shown for user-generated products */}
-          {product.description && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Description</Text>
-              <Text style={styles.descriptionText}>{product.description}</Text>
+          {/* Seller Information Card */}
+          {product.isUserGenerated && (
+            <View style={styles.sellerCard}>
+              <View style={styles.sellerAvatar}>
+                <Ionicons name="storefront-outline" size={24} color="#fff" />
+              </View>
+              <View style={styles.sellerDetails}>
+                <Text style={styles.sellerName}>Independent Seller</Text>
+                <Text style={styles.sellerLocation}>FairTrade Partner</Text>
+              </View>
+              <Ionicons name="checkmark-circle" size={24} color="#10B981" />
             </View>
           )}
 
-          {/* Product Details */}
+          {/* Features Grid */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Product Details</Text>
-            <View style={styles.detailsGrid}>
-              {product.quantity && (
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Available Quantity:</Text>
-                  <Text style={styles.detailValue}>{product.quantity} units</Text>
+            <Text style={styles.sectionTitle}>Why Buy From Us</Text>
+            <View style={styles.featuresGrid}>
+              <View style={styles.featureItem}>
+                <View style={[styles.featureIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                  <Ionicons name="shield-checkmark" size={22} color="#10B981" />
                 </View>
-              )}
-              
-              {product.deliveryMethod && (
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Delivery Method:</Text>
-                  <Text style={styles.detailValue}>{product.deliveryMethod}</Text>
-                </View>
-              )}
-              
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Category:</Text>
-                <Text style={styles.detailValue}>{product.category}</Text>
+                <Text style={styles.featureText}>Secure</Text>
               </View>
-              
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Product ID:</Text>
-                <Text style={styles.detailValue}>#{product.id}</Text>
+              <View style={styles.featureItem}>
+                <View style={[styles.featureIconBox, { backgroundColor: 'rgba(75, 86, 233, 0.1)' }]}>
+                  <Ionicons name="refresh" size={22} color="#4B56E9" />
+                </View>
+                <Text style={styles.featureText}>Returns</Text>
+              </View>
+              <View style={styles.featureItem}>
+                <View style={[styles.featureIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
+                  <Ionicons name="flash" size={22} color="#F59E0B" />
+                </View>
+                <Text style={styles.featureText}>Fast</Text>
               </View>
             </View>
           </View>
 
-          {/* Seller Information - Only for user-generated products */}
-          {product.id && typeof product.id === 'string' && product.id.includes('user_') && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Seller Information</Text>
-              <View style={styles.sellerInfo}>
-                <View style={styles.sellerAvatar}>
-                  <Ionicons name="person" size={24} color={theme.textSecondary} />
-                </View>
-                <View style={styles.sellerDetails}>
-                  <Text style={styles.sellerName}>Verified Seller</Text>
-                  <Text style={styles.sellerRating}>⭐ 4.8 (256 reviews)</Text>
-                  <Text style={styles.sellerLocation}>Ships nationwide</Text>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Additional Features */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Features</Text>
-            <View style={styles.featuresContainer}>
-              <View style={styles.featureItem}>
-                <Ionicons name="shield-checkmark" size={20} color="#00C851" />
-                <Text style={styles.featureText}>Verified Product</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="refresh" size={20} color="#4ECDC4" />
-                <Text style={styles.featureText}>30-day Return</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="car" size={20} color="#45B7D1" />
-                <Text style={styles.featureText}>Fast Delivery</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="card" size={20} color="#96CEB4" />
-                <Text style={styles.featureText}>Secure Payment</Text>
-              </View>
-            </View>
-          </View>
+          <View style={{ height: 100 }} /> 
         </View>
       </ScrollView>
 
-      {/* Bottom Action Buttons */}
-      <View style={styles.bottomContainer}>
+      {/* Modern Bottom Action Bar */}
+      <View style={styles.bottomBar}>
         <TouchableOpacity 
-          style={styles.addToCartButton}
+          style={styles.cartBtn}
           onPress={handleAddToCart}
           activeOpacity={0.8}
         >
-          <Ionicons name="basket-outline" size={20} color="#4B56E9" />
-          <Text style={styles.addToCartText}>Add to Cart</Text>
+          <Ionicons name="cart-outline" size={24} color={theme.text} />
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.buyNowButton}
-          onPress={handleBuyNow}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="flash" size={20} color="#fff" />
-          <Text style={styles.buyNowText}>Buy Now</Text>
-        </TouchableOpacity>
+        {product.isUserGenerated && product.seller_id ? (
+          <TouchableOpacity 
+            style={styles.primaryBtn}
+            onPress={handleChatWithSeller}
+            activeOpacity={0.8}
+            disabled={isStartingChat}
+          >
+            {isStartingChat ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <>
+                <Ionicons name="chatbubbles-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.primaryBtnText}>Message Seller</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={styles.primaryBtn}
+            onPress={handleAddToCart}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="bag-check-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.primaryBtnText}>Buy Now</Text>
+          </TouchableOpacity>
+        )}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
-const createStyles = (theme) => ({
+const createStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.border,
-  },
-  headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: theme.text,
-  },
   scrollView: {
     flex: 1,
   },
+  floatingHeader: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
   imageContainer: {
-    position: 'relative',
-    height: 300,
-    backgroundColor: theme.surface,
+    width: width,
+    height: height * 0.45,
+    backgroundColor: '#f3f4f6',
   },
   productImage: {
     width: '100%',
@@ -333,233 +372,244 @@ const createStyles = (theme) => ({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  placeholderText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: theme.textTertiary,
+    backgroundColor: '#E5E7EB',
   },
   newBadge: {
     position: 'absolute',
-    top: 15,
-    left: 15,
-    backgroundColor: '#4B56E9',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 15,
+    bottom: 40,
+    left: 20,
+    backgroundColor: '#10B981',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   newBadgeText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   contentContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    backgroundColor: theme.background,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    marginTop: -30,
+    paddingHorizontal: 24,
+    paddingTop: 30,
+    minHeight: height * 0.6,
   },
-  titleContainer: {
-    marginBottom: 15,
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 24,
+  },
+  titleWrapper: {
+    flex: 1,
+    paddingRight: 16,
   },
   productName: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '800',
     color: theme.text,
     marginBottom: 8,
-  },
-  priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  price: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#4B56E9',
-    marginRight: 10,
-  },
-  discountContainer: {
-    backgroundColor: '#FF6B6B',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  discountText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
+    lineHeight: 32,
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    marginRight: 8,
   },
   ratingText: {
     fontSize: 14,
-    color: theme.textSecondary,
+    fontWeight: '700',
+    color: theme.text,
+    marginLeft: 6,
   },
-  categoryContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  categoryText: {
-    fontSize: 16,
+  reviewsText: {
     color: theme.textSecondary,
-    marginLeft: 5,
+    fontWeight: '400',
+  },
+  priceContainer: {
+    alignItems: 'flex-end',
+  },
+  price: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: theme.primary ?? '#4B56E9',
+  },
+  discountContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  discountText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
   },
   section: {
-    marginBottom: 25,
+    marginBottom: 32,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: theme.text,
     marginBottom: 12,
   },
   descriptionText: {
-    fontSize: 16,
+    fontSize: 15,
     color: theme.textSecondary,
     lineHeight: 24,
   },
-  detailsGrid: {
-    gap: 12,
-  },
-  detailItem: {
+  pillsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.border,
+    flexWrap: 'wrap',
+    gap: 10,
   },
-  detailLabel: {
-    fontSize: 16,
-    color: theme.textSecondary,
-    flex: 1,
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
-  detailValue: {
-    fontSize: 16,
+  pillText: {
+    marginLeft: 8,
+    fontSize: 14,
     color: theme.text,
     fontWeight: '500',
-    flex: 1,
-    textAlign: 'right',
   },
-  sellerInfo: {
+  sellerCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: theme.surface,
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 32,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   sellerAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: theme.surface,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: theme.primary ?? '#4B56E9',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 15,
+    marginRight: 16,
   },
   sellerDetails: {
     flex: 1,
   },
   sellerName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: theme.text,
-    marginBottom: 2,
-  },
-  sellerRating: {
-    fontSize: 14,
-    color: theme.textSecondary,
     marginBottom: 2,
   },
   sellerLocation: {
-    fontSize: 14,
+    fontSize: 13,
     color: theme.textSecondary,
   },
-  featuresContainer: {
+  featuresGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 15,
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
   },
   featureItem: {
-    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: '45%',
+    flex: 1,
+  },
+  featureIconBox: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   featureText: {
-    fontSize: 14,
+    fontSize: 13,
     color: theme.text,
-    marginLeft: 8,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  bottomContainer: {
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: theme.surface,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    backgroundColor: theme.background,
     borderTopWidth: 1,
     borderTopColor: theme.border,
-    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 10,
+    gap: 16,
   },
-  addToCartButton: {
+  cartBtn: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  primaryBtn: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: theme.primary ?? '#4B56E9',
+    borderRadius: 16,
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: theme.background,
-    borderWidth: 2,
-    borderColor: '#4B56E9',
-  },
-  addToCartText: {
-    color: '#4B56E9',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  buyNowButton: {
-    flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#4B56E9',
+    shadowColor: theme.primary ?? '#4B56E9',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  buyNowText: {
+  primaryBtnText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    fontWeight: '700',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
   },
   errorText: {
     fontSize: 18,
     color: theme.textSecondary,
-    marginTop: 20,
-    marginBottom: 30,
-    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
   },
-  backButton: {
-    backgroundColor: '#4B56E9',
-    paddingHorizontal: 20,
+  backButtonError: {
+    backgroundColor: theme.primary ?? '#4B56E9',
+    paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
-  backButtonText: {
+  backButtonTextError: {
     color: '#fff',
-    fontSize: 16,
     fontWeight: '600',
+    fontSize: 16,
   },
 });

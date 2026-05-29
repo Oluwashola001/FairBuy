@@ -6,6 +6,7 @@ import {
   Alert,
   FlatList,
   Image,
+  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -57,65 +58,97 @@ export default function CartScreen() {
     updateQuantity?.(id, newQty);
   };
 
+  const confirmRemoveItem = (itemName: string, itemId: any) => {
+    Alert.alert(
+      "Remove Item",
+      `Remove "${itemName}" from cart?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => removeFromCart(itemId) },
+      ]
+    );
+  };
+
   const confirmClearCart = () => {
     if (!clearCart) return;
-    Alert.alert("Clear cart", "Are you sure you want to clear the cart?", [
+    Alert.alert("Clear Cart", "Remove all items from cart?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Clear", style: "destructive", onPress: () => clearCart() },
+      { text: "Clear All", style: "destructive", onPress: () => clearCart() },
     ]);
   };
 
   const renderItem = ({ item, index }: { item: any; index: number }) => {
     const qty = item.quantity || 1;
+    const itemTotal = (item.price || 0) * qty;
+
     return (
-      <View style={styles.itemRow}>
-        <Image
-          source={getImageSource(item.image)}
-          style={styles.itemImage}
-          resizeMode="cover"
-        />
-        <View style={styles.itemDetails}>
-          <Text style={styles.itemName} numberOfLines={2}>
-            {item.name}
-          </Text>
-          {item.description ? (
-            <Text style={styles.itemDesc} numberOfLines={2}>
-              {item.description}
-            </Text>
-          ) : null}
-          <View style={styles.rowBetween}>
-            <Text style={styles.itemPrice}>${(item.price || 0).toFixed(2)}</Text>
-            <Text style={styles.itemUnit}>/piece</Text>
+      <View style={styles.itemCard}>
+        <View style={styles.itemImageContainer}>
+          <Image
+            source={getImageSource(item.image)}
+            style={styles.itemImage}
+            resizeMode="cover"
+          />
+        </View>
+        
+        <View style={styles.itemContent}>
+          <View style={styles.itemHeader}>
+            <View style={styles.itemInfo}>
+              <Text style={styles.itemName} numberOfLines={2}>
+                {item.name}
+              </Text>
+              {item.description ? (
+                <Text style={styles.itemDesc} numberOfLines={2}>
+                  {item.description}
+                </Text>
+              ) : null}
+            </View>
+            
+            <TouchableOpacity
+              onPress={() => confirmRemoveItem(item.name, item.id)}
+              style={styles.removeBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={20} color="#ef4444" />
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.controlsRow}>
-            <View style={styles.qtyWrapper}>
+          <View style={styles.itemFooter}>
+            <View style={styles.priceSection}>
+              <Text style={styles.unitPrice}>${(item.price || 0).toFixed(2)} each</Text>
+              <Text style={styles.itemTotal}>${itemTotal.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.quantityControls}>
               <TouchableOpacity
-                style={styles.qtyBtn}
+                style={[styles.qtyBtn, qty <= 1 && styles.qtyBtnDisabled]}
                 onPress={() => handleDecrease(item.id ?? index, qty)}
-                accessibilityLabel="Decrease quantity"
+                disabled={qty <= 1}
+                activeOpacity={0.7}
               >
-                <Text style={styles.qtyBtnText}>-</Text>
+                <Ionicons 
+                  name="remove" 
+                  size={16} 
+                  color={qty <= 1 ? "#d1d5db" : theme?.brandColor ?? "#4B56E9"} 
+                />
               </TouchableOpacity>
 
-              <Text style={styles.qtyText}>{qty}</Text>
+              <View style={styles.qtyDisplay}>
+                <Text style={styles.qtyText}>{qty}</Text>
+              </View>
 
               <TouchableOpacity
                 style={styles.qtyBtn}
                 onPress={() => handleIncrease(item.id ?? index, qty)}
-                accessibilityLabel="Increase quantity"
+                activeOpacity={0.7}
               >
-                <Text style={styles.qtyBtnText}>+</Text>
+                <Ionicons 
+                  name="add" 
+                  size={16} 
+                  color={theme?.brandColor ?? "#4B56E9"} 
+                />
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              onPress={() => removeFromCart(item.id)}
-              style={styles.trashBtn}
-              accessibilityLabel="Remove item"
-            >
-              <Ionicons name="trash-outline" size={20} color={theme.text} />
-            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -123,24 +156,44 @@ export default function CartScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={theme.text} />
+          <Ionicons name="chevron-back" size={24} color={theme?.text ?? "#1a1d21"} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Cart ({itemCount})</Text>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Cart</Text>
+          {itemCount > 0 && (
+            <Text style={styles.headerSubtitle}>
+              {itemCount} {itemCount === 1 ? 'item' : 'items'}
+            </Text>
+          )}
+        </View>
+        {cart.length > 0 && (
+          <TouchableOpacity onPress={confirmClearCart} style={styles.clearAllBtn}>
+            <Text style={styles.clearAllText}>Clear All</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Body */}
       {cart.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>🛒 Your cart is empty</Text>
-          <Text style={styles.emptySubtitle}>Add items to see them here.</Text>
+          <View style={styles.emptyIconContainer}>
+            <Ionicons name="bag-outline" size={80} color={theme?.textSecondary ?? "#9ca3af"} />
+          </View>
+          <Text style={styles.emptyTitle}>Your cart is empty</Text>
+          <Text style={styles.emptySubtitle}>
+            Looks like you haven't added anything to your cart yet.{"\n"}
+            Start shopping to fill it up!
+          </Text>
           <TouchableOpacity
             style={styles.shopBtn}
             onPress={() => router.push("/home")}
+            activeOpacity={0.8}
           >
+            <Ionicons name="storefront-outline" size={20} color="#fff" style={styles.shopBtnIcon} />
             <Text style={styles.shopBtnText}>Start Shopping</Text>
           </TouchableOpacity>
         </View>
@@ -149,44 +202,45 @@ export default function CartScreen() {
           <FlatList
             data={cart}
             renderItem={renderItem}
-            keyExtractor={(item, index) =>
-              `${item?.id ?? "item"}-${index}`
-            }
+            keyExtractor={(item, index) => `${item?.id ?? "item"}-${index}`}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
           />
 
           {/* Footer summary & actions */}
           <View style={styles.footer}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Item(s) total:</Text>
-              {/* ✅ FIX: show number of items */}
-              <Text style={styles.summaryValue}>{itemCount}</Text>
-            </View>
+            <View style={styles.summaryContainer}>
 
-            <View style={styles.divider} />
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>
+                  Subtotal ({itemCount} {itemCount === 1 ? 'item' : 'items'})
+                </Text>
+                <Text style={styles.summaryValue}>${subtotal.toFixed(2)}</Text>
+              </View>
 
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, styles.totalLabel]}>Total</Text>
-              <Text style={[styles.summaryValue, styles.totalValue]}>
-                ${subtotal.toFixed(2)}
-              </Text>
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>${subtotal.toFixed(2)}</Text>
+              </View>
             </View>
 
             <TouchableOpacity
               style={styles.checkoutBtn}
               onPress={() => router.push("/checkout")}
+              activeOpacity={0.8}
             >
-              <Text style={styles.checkoutBtnText}>Proceed to Checkout</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.clearBtn} onPress={confirmClearCart}>
-              <Text style={styles.clearBtnText}>Clear Cart</Text>
+              <Ionicons name="card-outline" size={20} color="#fff" style={styles.checkoutBtnIcon} />
+              <Text style={styles.checkoutBtnText}>
+                Proceed to Checkout • ${subtotal.toFixed(2)}
+              </Text>
             </TouchableOpacity>
           </View>
         </>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -195,109 +249,158 @@ const createStyles = (theme: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme?.background ?? "#fff",
+      backgroundColor: theme?.background ?? "#f8f9fa",
     },
     header: {
       flexDirection: "row",
       alignItems: "center",
-      paddingTop: 18,
-      paddingHorizontal: 16,
-      paddingBottom: 8,
+      paddingHorizontal: 20,
+      paddingBottom: 10,
+      paddingTop: 16,
+      paddingVertical: 16,
+      backgroundColor: theme?.background ?? "#fff",
+      borderBottomWidth: 0.5,
+      borderBottomColor: theme?.border ?? "#e1e5e9",
     },
     backBtn: {
-      padding: 6,
-      marginRight: 6,
+      padding: 8,
+      marginRight: 12,
+      borderRadius: 8,
+    },
+    headerContent: {
+      flex: 1,
     },
     headerTitle: {
-      fontSize: 20,
+      fontSize: 22,
       fontWeight: "700",
-      color: theme?.text ?? "#111",
+      color: theme?.text ?? "#1a1d21",
     },
+    headerSubtitle: {
+      fontSize: 14,
+      color: theme?.textSecondary ?? "#6b7280",
+      marginTop: 2,
+    },
+    clearAllBtn: {
+      padding: 8,
+    },
+    clearAllText: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: "#ef4444",
+    },
+    
     listContent: {
       paddingVertical: 8,
       paddingHorizontal: 16,
-      paddingBottom: 220, // leave space for footer
+      paddingBottom: 220, // Reduced from 220 to give more space
     },
-    itemRow: {
+    itemSeparator: {
+      height: 8, // Reduced from 12
+    },
+    itemCard: {
+      backgroundColor: theme.background,
+      borderRadius: 16,
+      padding: 16,
       flexDirection: "row",
-      alignItems: "flex-start",
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: theme?.border ?? "#eee",
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 3,
+    },
+    itemImageContainer: {
+      marginRight: 16,
     },
     itemImage: {
-      width: 72,
-      height: 72,
-      borderRadius: 10,
-      backgroundColor: theme?.card ?? "#f2f2f2",
-      marginRight: 12,
+      width: 80,
+      height: 80,
+      borderRadius: 12,
+      backgroundColor: theme.background,
     },
-    itemDetails: {
+    itemContent: {
       flex: 1,
-      justifyContent: "center",
+    },
+    itemHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 12,
+    },
+    itemInfo: {
+      flex: 1,
+      marginRight: 12,
     },
     itemName: {
       fontSize: 16,
       fontWeight: "600",
-      color: theme?.text ?? "#111",
+      color: theme?.text ?? "#1a1d21",
       marginBottom: 4,
+      lineHeight: 22,
     },
     itemDesc: {
-      fontSize: 13,
-      color: theme?.textTertiary ?? "#666",
-      marginBottom: 6,
+      fontSize: 14,
+      color: theme?.textSecondary ?? "#6b7280",
+      lineHeight: 20,
     },
-    rowBetween: {
+    removeBtn: {
+      padding: 4,
+      borderRadius: 6,
+      backgroundColor: "#fef2f2",
+    },
+    itemFooter: {
       flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "flex-start",
-      gap: 8,
+      justifyContent: "space-between",
+      alignItems: "flex-end",
     },
-    itemPrice: {
-      fontSize: 16,
+    priceSection: {
+      flex: 1,
+    },
+    unitPrice: {
+      fontSize: 13,
+      color: theme?.textSecondary ?? "#6b7280",
+      marginBottom: 4,
+    },
+    itemTotal: {
+      fontSize: 18,
       fontWeight: "700",
       color: theme?.brandColor ?? "#4B56E9",
-      marginRight: 8,
     },
-    itemUnit: {
-      fontSize: 13,
-      color: theme?.textSecondary ?? "#666",
-    },
-    controlsRow: {
-      marginTop: 8,
+    quantityControls: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-    },
-    qtyWrapper: {
-      flexDirection: "row",
-      alignItems: "center",
-      backgroundColor: theme?.surface ?? "#fafafa",
-      borderRadius: 6,
+      backgroundColor: theme?.background ?? "#f8f9fa",
+      borderRadius: 12,
+      padding: 4,
       borderWidth: 1,
-      borderColor: theme?.border ?? "#ddd",
-      paddingHorizontal: 6,
-      paddingVertical: 2,
+      borderColor: theme?.border ?? "#e1e5e9",
     },
     qtyBtn: {
-      paddingHorizontal: 8,
-      paddingVertical: 4,
+      width: 32,
+      height: 32,
+      borderRadius: 8,
+      backgroundColor: "#fff",
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+      elevation: 2,
     },
-    qtyBtnText: {
-      fontSize: 16,
-      fontWeight: "700",
-      color: theme?.text ?? "#111",
+    qtyBtnDisabled: {
+      backgroundColor: "#f9fafb",
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    qtyDisplay: {
+      minWidth: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 8,
     },
     qtyText: {
-      minWidth: 26,
-      textAlign: "center",
-      fontSize: 15,
-      color: theme?.text ?? "#111",
+      fontSize: 16,
       fontWeight: "600",
-    },
-    trashBtn: {
-      padding: 6,
-      marginLeft: 8,
+      color: theme?.text ?? "#1a1d21",
     },
 
     /* Footer */
@@ -306,64 +409,96 @@ const createStyles = (theme: any) =>
       left: 0,
       right: 0,
       bottom: 0,
-      padding: 16,
+      backgroundColor: theme.background,
       borderTopWidth: 1,
-      borderTopColor: theme?.border ?? "#eee",
-      backgroundColor: theme?.background ?? "#fff",
+      borderTopColor: theme?.border ?? "#e1e5e9",
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 10,
+    },
+    summaryContainer: {
+      padding: 16,
+      paddingBottom: 12,
+    },
+    summaryHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 16,
+    },
+    summaryHeaderText: {
+      fontSize: 18,
+      fontWeight: "600",
+      color: theme?.text ?? "#1a1d21",
+      marginLeft: 8,
     },
     summaryRow: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      marginBottom: 8,
+      paddingVertical: 2,
     },
     summaryLabel: {
-      fontSize: 16,
-      color: theme?.textSecondary ?? "#666",
+      fontSize: 15,
+      color: theme?.textSecondary ?? "#6b7280",
     },
     summaryValue: {
-      fontSize: 16,
-      fontWeight: "700",
-      color: theme?.text ?? "#111",
+      fontSize: 15,
+      fontWeight: "500",
+      color: theme?.text ?? "#1a1d21",
     },
-    divider: {
+    summaryDivider: {
       height: 1,
-      backgroundColor: theme?.border ?? "#eee",
-      marginVertical: 8,
+      backgroundColor: theme?.border ?? "#e1e5e9",
+      marginVertical: 12,
     },
     totalLabel: {
       fontSize: 18,
+      fontWeight: "700",
+      color: theme?.text ?? "#1a1d21",
     },
     totalValue: {
-      fontSize: 18,
-      color: theme?.text ?? "#111",
+      fontSize: 20,
+      fontWeight: "700",
+      color: theme?.brandColor ?? "#4B56E9",
     },
 
     checkoutBtn: {
-      marginTop: 8,
+      marginHorizontal: 16,
+      marginBottom: 8,
       backgroundColor: theme?.brandColor ?? "#4B56E9",
       paddingVertical: 14,
       borderRadius: 12,
+      flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
+      shadowColor: theme?.brandColor ?? "#4B56E9",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    checkoutBtnIcon: {
+      marginRight: 8,
     },
     checkoutBtnText: {
-      color: theme?.brandOnColor ?? "#fff",
+      color: "#fff",
       fontWeight: "700",
       fontSize: 16,
     },
 
-    clearBtn: {
-      marginTop: 10,
-      backgroundColor: theme?.danger ?? "red",
-      paddingVertical: 12,
-      borderRadius: 10,
+    securityNotice: {
+      flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
+      paddingBottom: 20,
+      paddingTop: 8,
     },
-    clearBtnText: {
-      color: "#fff",
-      fontWeight: "700",
+    securityNoticeText: {
+      fontSize: 12,
+      color: theme?.textSecondary ?? "#6b7280",
+      marginLeft: 6,
     },
 
     /* Empty state */
@@ -372,28 +507,47 @@ const createStyles = (theme: any) =>
       alignItems: "center",
       justifyContent: "center",
       paddingHorizontal: 32,
-      gap: 12,
+    },
+    emptyIconContainer: {
+      width: 120,
+      height: 120,
+      borderRadius: 60,
+      backgroundColor: theme?.surface ?? "#f3f4f6",
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 24,
     },
     emptyTitle: {
-      fontSize: 20,
+      fontSize: 24,
       fontWeight: "700",
-      color: theme?.text ?? "#111",
-      marginBottom: 4,
+      color: theme?.text ?? "#1a1d21",
+      marginBottom: 12,
     },
     emptySubtitle: {
-      fontSize: 14,
-      color: theme?.textSecondary ?? "#666",
-      marginBottom: 16,
+      fontSize: 16,
+      color: theme?.textSecondary ?? "#6b7280",
+      marginBottom: 32,
       textAlign: "center",
+      lineHeight: 24,
     },
     shopBtn: {
       backgroundColor: theme?.brandColor ?? "#4B56E9",
-      paddingHorizontal: 18,
-      paddingVertical: 12,
-      borderRadius: 10,
+      paddingHorizontal: 24,
+      paddingVertical: 16,
+      borderRadius: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      shadowColor: theme?.brandColor ?? "#4B56E9",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    shopBtnIcon: {
+      marginRight: 8,
     },
     shopBtnText: {
-      color: theme?.brandOnColor ?? "#fff",
+      color: "#fff",
       fontWeight: "700",
       fontSize: 16,
     },
