@@ -4,8 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
+  Dimensions,
   Image,
+  Modal,
+  Platform,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -15,6 +19,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 
+const { width } = Dimensions.get('window');
 const brandColor = '#4B56E9';
 
 export default function SellerOrdersScreen() {
@@ -23,17 +28,38 @@ export default function SellerOrdersScreen() {
 
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // NEW: State to manage the currently selected order for the Modal
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [isStartingChat, setIsStartingChat] = useState(false);
+
+  // --- Global Custom Modal State ---
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({ visible: false, title: '', message: '' });
+
+  const showAlert = (title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({
+      visible: true,
+      title,
+      message,
+      buttons: buttons || [{ text: 'OK', onPress: () => hideAlert(), style: 'default' }]
+    });
+  };
+
+  const hideAlert = () => setAlertConfig(prev => ({ ...prev, visible: false }));
 
   // Load orders from Supabase
   const loadOrders = async () => {
     try {
       setLoading(true);
       
-      // 1. Get the current seller's ID
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 2. Fetch orders where this user is the seller
       const { data, error } = await supabase
         .from('orders')
         .select('*')
@@ -42,20 +68,23 @@ export default function SellerOrdersScreen() {
 
       if (error) throw error;
 
-      // 3. Map the database fields to match our UI components
       if (data) {
+        // Mapped extra fields (price, created_at, buyer_id) needed for the details modal
         const mappedOrders = data.map((order) => ({
           id: order.id,
           product: order.product_name || 'Unknown Product',
           image: order.product_image || 'https://via.placeholder.com/150',
           status: order.status || 'Pending',
           user: order.buyer_name || 'Anonymous Buyer',
+          buyer_id: order.buyer_id,
+          price: order.total_price || 0,
+          created_at: order.created_at,
         }));
         setOrders(mappedOrders);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading orders:', err);
-      Alert.alert('Error', 'Could not load your orders.');
+      showAlert('Error', 'Could not load your orders.');
     } finally {
       setLoading(false);
     }
@@ -68,13 +97,17 @@ export default function SellerOrdersScreen() {
   // Update order status and persist to Supabase
   const updateOrderStatus = async (orderId: number | string, newStatus: string) => {
     try {
-      // 1. Optimistically update the UI immediately for a snappy feel
+      // Optimistic UI update
       const updatedOrders = orders.map((order) =>
         order.id === orderId ? { ...order, status: newStatus } : order
       );
       setOrders(updatedOrders);
+      
+      // Update modal state if open
+      if (selectedOrder && selectedOrder.id === orderId) {
+        setSelectedOrder({ ...selectedOrder, status: newStatus });
+      }
 
-      // 2. Update the actual database record
       const { error } = await supabase
         .from('orders')
         .update({ status: newStatus })
@@ -82,38 +115,112 @@ export default function SellerOrdersScreen() {
 
       if (error) throw error;
       
+      showAlert('Success', `Order marked as ${newStatus}`);
     } catch (err) {
       console.error('Error updating order status:', err);
-      Alert.alert('Error', 'Could not update order status.');
-      // Re-load from DB to revert the optimistic UI if it failed
+      showAlert('Error', 'Could not update order status.');
       loadOrders(); 
     }
   };
 
-  // Status colors
+  const handleCancelAndRefund = (orderId: string | number) => {
+    showAlert(
+      "Cancel & Refund",
+      "Are you sure you want to cancel this order? The buyer will be refunded.",
+      [
+        { text: "No, Go Back", style: "cancel" },
+        { 
+          text: "Yes, Cancel Order", 
+          style: "destructive",
+          onPress: () => updateOrderStatus(orderId, 'Cancelled')
+        }
+      ]
+    );
+  };
+
+  const handleContactBuyer = async (order: any) => {
+    if (!order.buyer_id) {
+      showAlert('Notice', 'Cannot contact this buyer (Missing ID).');
+      return;
+    }
+    
+    try {
+      setIsStartingChat(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+
+      // 1. Check if a conversation already exists
+      const { data: existingConversations, error: fetchError } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('seller_id', session.user.id)
+        .eq('buyer_id', order.buyer_id)
+        .limit(1);
+
+      if (fetchError) throw fetchError;
+
+      let conversationId;
+
+      if (existingConversations && existingConversations.length > 0) {
+        conversationId = existingConversations[0].id;
+      } else {
+        // 2. Create a new conversation room
+        const { data: newConvo, error: insertError } = await supabase
+          .from('conversations')
+          .insert({
+            seller_id: session.user.id,
+            buyer_id: order.buyer_id,
+            product_id: order.id 
+          })
+          .select('id')
+          .single();
+
+        if (insertError) throw insertError;
+        conversationId = newConvo.id;
+      }
+
+      setSelectedOrder(null); // Close the modal before routing
+
+      router.push({
+        pathname: '/chat-room',
+        params: {
+          conversationId: conversationId,
+          recipientId: order.buyer_id,
+          recipientNameParam: order.user,
+        }
+      });
+
+    } catch (err: any) {
+      console.error('Error opening chat:', err);
+      showAlert('Error', 'Could not connect to the buyer right now.');
+    } finally {
+      setIsStartingChat(false);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Just now';
+    const d = new Date(dateString);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Pending':
-        return '#F59E0B';
-      case 'Shipped':
-        return '#3B82F6';
-      case 'Completed':
-        return '#10B981';
-      default:
-        return '#6B7280';
+      case 'Pending': return '#F59E0B';
+      case 'Shipped': return '#3B82F6';
+      case 'Completed': return '#10B981';
+      case 'Cancelled': return '#EF4444';
+      default: return '#6B7280';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'Pending':
-        return 'time-outline';
-      case 'Shipped':
-        return 'car-outline';
-      case 'Completed':
-        return 'checkmark-circle-outline';
-      default:
-        return 'ellipse-outline';
+      case 'Pending': return 'time-outline';
+      case 'Shipped': return 'car-outline';
+      case 'Completed': return 'checkmark-circle-outline';
+      case 'Cancelled': return 'close-circle-outline';
+      default: return 'ellipse-outline';
     }
   };
 
@@ -121,19 +228,53 @@ export default function SellerOrdersScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Global Custom UI Modal for Alerts */}
+      <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={hideAlert}>
+        <View style={styles.modalOverlayAlert}>
+          <View style={styles.modalAlertContainer}>
+            <Text style={styles.modalAlertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalAlertMessage}>{alertConfig.message}</Text>
+            <View style={styles.modalAlertButtonGroup}>
+              {alertConfig.buttons?.map((btn, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => {
+                    hideAlert();
+                    if (btn.onPress) setTimeout(btn.onPress, 100);
+                  }}
+                  style={[
+                    styles.modalAlertBtn,
+                    btn.style === 'destructive' ? styles.modalAlertBtnDestructive : 
+                    btn.style === 'cancel' ? styles.modalAlertBtnCancel : styles.modalAlertBtnDefault
+                  ]}
+                >
+                  <Text style={[
+                    styles.modalAlertBtnText,
+                    btn.style === 'cancel' ? { color: theme.text } : { color: '#fff' }
+                  ]}>
+                    {btn.text}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={theme.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Your Orders</Text>
+        <Text style={styles.headerTitle}>Order Management</Text>
         <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {loading ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>Loading Orders...</Text>
+            <ActivityIndicator size="large" color={brandColor} />
+            <Text style={[styles.emptyTitle, { marginTop: 16 }]}>Loading Orders...</Text>
           </View>
         ) : orders.length === 0 ? (
           <View style={styles.section}>
@@ -159,7 +300,7 @@ export default function SellerOrdersScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="bag-handle-outline" size={20} color={theme?.primary ?? brandColor} />
-              <Text style={styles.sectionTitle}>Orders ({orders.length})</Text>
+              <Text style={styles.sectionTitle}>Active Orders ({orders.length})</Text>
             </View>
 
             <View style={styles.ordersContainer}>
@@ -173,13 +314,13 @@ export default function SellerOrdersScreen() {
                     
                     <View style={styles.orderInfo}>
                       <View style={styles.orderHeader}>
-                        <Text style={styles.orderProduct} numberOfLines={2}>
+                        <Text style={styles.orderProduct} numberOfLines={1}>
                           {order.product}
                         </Text>
                         <View style={[styles.statusBadge, { backgroundColor: `${getStatusColor(order.status)}15` }]}>
                           <Ionicons 
                             name={getStatusIcon(order.status) as any} 
-                            size={14} 
+                            size={12} 
                             color={getStatusColor(order.status)} 
                           />
                           <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
@@ -191,35 +332,20 @@ export default function SellerOrdersScreen() {
                       <View style={styles.orderMeta}>
                         <View style={styles.customerInfo}>
                           <Ionicons name="person-outline" size={14} color={theme?.textSecondary ?? '#6b7280'} />
-                          <Text style={styles.customerName}>{order.user}</Text>
+                          <Text style={styles.customerName} numberOfLines={1}>{order.user}</Text>
                         </View>
-                        {/* Ensure we display a truncated ID if UUIDs are long */}
-                        <Text style={styles.orderId}>#{String(order.id).substring(0, 6)}</Text>
+                        <Text style={styles.orderId}>#{String(order.id).substring(0, 8)}</Text>
                       </View>
 
-                      {/* Action Buttons */}
-                      <View style={styles.actionButtons}>
-                        {order.status === 'Pending' && (
-                          <TouchableOpacity
-                            style={[styles.actionButton, styles.shipButton]}
-                            onPress={() => updateOrderStatus(order.id, 'Shipped')}
-                            activeOpacity={0.8}
-                          >
-                            <Ionicons name="car-outline" size={16} color="#fff" />
-                            <Text style={styles.actionButtonText}>Mark as Shipped</Text>
-                          </TouchableOpacity>
-                        )}
-                        {order.status === 'Shipped' && (
-                          <TouchableOpacity
-                            style={[styles.actionButton, styles.completeButton]}
-                            onPress={() => updateOrderStatus(order.id, 'Completed')}
-                            activeOpacity={0.8}
-                          >
-                            <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
-                            <Text style={styles.actionButtonText}>Mark as Completed</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
+                      {/* NEW: Replaced Inline Actions with a single "Manage Order" Button */}
+                      <TouchableOpacity
+                        style={styles.manageButton}
+                        onPress={() => setSelectedOrder(order)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.manageButtonText}>Manage Order</Text>
+                        <Ionicons name="arrow-forward" size={16} color={brandColor} />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </View>
@@ -227,9 +353,111 @@ export default function SellerOrdersScreen() {
             </View>
           </View>
         )}
-
         <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      {/* --- NEW: Full-Screen Order Management Modal --- */}
+      <Modal visible={!!selectedOrder} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.fullScreenModal}>
+          {selectedOrder && (
+            <>
+              <View style={styles.fullScreenModalHeader}>
+                <TouchableOpacity onPress={() => setSelectedOrder(null)} style={styles.modalCloseButton}>
+                  <Ionicons name="close" size={24} color={theme.text} />
+                </TouchableOpacity>
+                <Text style={styles.fullScreenModalTitle}>Manage Order</Text>
+                <View style={{ width: 40 }} />
+              </View>
+
+              <ScrollView style={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
+                <View style={styles.modalImageContainer}>
+                  <Image source={{ uri: selectedOrder.image }} style={styles.modalImage} />
+                  <View style={[styles.modalStatusBadge, { backgroundColor: getStatusColor(selectedOrder.status) }]}>
+                    <Text style={styles.modalStatusText}>{selectedOrder.status.toUpperCase()}</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.modalProductName}>{selectedOrder.product}</Text>
+                
+                {/* Order Details Breakdown */}
+                <View style={styles.detailsBox}>
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Order ID</Text>
+                    <Text style={styles.modalValue}>#{String(selectedOrder.id).substring(0,8)}</Text>
+                  </View>
+
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Date Placed</Text>
+                    <Text style={styles.modalValue}>{formatDate(selectedOrder.created_at)}</Text>
+                  </View>
+
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Buyer Name</Text>
+                    <Text style={styles.modalValue}>{selectedOrder.user}</Text>
+                  </View>
+
+                  <View style={[styles.modalDetailRow, { borderBottomWidth: 0 }]}>
+                    <Text style={styles.modalLabel}>Order Total</Text>
+                    <Text style={styles.modalValuePrice}>${selectedOrder.price}</Text>
+                  </View>
+                </View>
+
+                {/* Management Actions */}
+                <View style={styles.modalActionButtons}>
+                  
+                  {/* Primary Progression Actions */}
+                  {selectedOrder.status === 'Pending' && (
+                    <TouchableOpacity 
+                      style={[styles.modalPrimaryBtn, { backgroundColor: '#3B82F6' }]} 
+                      onPress={() => updateOrderStatus(selectedOrder.id, 'Shipped')}
+                    >
+                      <Ionicons name="car-outline" size={20} color="#fff" />
+                      <Text style={styles.modalPrimaryBtnText}>Mark as Shipped</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {selectedOrder.status === 'Shipped' && (
+                    <TouchableOpacity 
+                      style={[styles.modalPrimaryBtn, { backgroundColor: '#10B981' }]} 
+                      onPress={() => updateOrderStatus(selectedOrder.id, 'Completed')}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+                      <Text style={styles.modalPrimaryBtnText}>Mark as Completed</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Contact Buyer */}
+                  <TouchableOpacity 
+                    style={styles.modalSecondaryBtn} 
+                    onPress={() => handleContactBuyer(selectedOrder)}
+                    disabled={isStartingChat}
+                  >
+                    {isStartingChat ? <ActivityIndicator size="small" color={brandColor} /> : (
+                      <>
+                        <Ionicons name="chatbubble-ellipses-outline" size={20} color={brandColor} />
+                        <Text style={styles.modalSecondaryBtnText}>Contact Buyer</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Destructive Actions */}
+                  {(selectedOrder.status === 'Pending' || selectedOrder.status === 'Shipped') && (
+                    <TouchableOpacity 
+                      style={styles.modalDestructiveBtn} 
+                      onPress={() => handleCancelAndRefund(selectedOrder.id)}
+                    >
+                      <Ionicons name="refresh-circle-outline" size={20} color="#EF4444" />
+                      <Text style={styles.modalDestructiveBtnText}>Cancel & Refund Order</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                
+                <View style={{ height: 60 }} />
+              </ScrollView>
+            </>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -245,7 +473,7 @@ const createStyles = (theme: any) =>
       alignItems: 'center',
       paddingHorizontal: 20,
       paddingVertical: 16,
-      paddingTop: 40,
+      paddingTop: Platform.OS === 'ios' ? 10 : 40,
       backgroundColor: theme?.background ?? '#fff',
       borderBottomWidth: 1,
       borderBottomColor: theme?.border ?? '#e1e5e9',
@@ -268,16 +496,18 @@ const createStyles = (theme: any) =>
       flex: 1,
     },
     section: {
-      backgroundColor: theme?.background ?? '#fff',
+      backgroundColor: theme?.card ?? '#fff',
       marginHorizontal: 16,
       marginTop: 16,
       borderRadius: 16,
       padding: 20,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
+      shadowOpacity: 0.05,
       shadowRadius: 8,
       elevation: 3,
+      borderWidth: 1,
+      borderColor: theme?.border ?? '#e1e5e9',
     },
     sectionHeader: {
       flexDirection: 'row',
@@ -286,7 +516,7 @@ const createStyles = (theme: any) =>
     },
     sectionTitle: {
       fontSize: 18,
-      fontWeight: '600',
+      fontWeight: '700',
       color: theme?.text ?? '#1a1d21',
       marginLeft: 8,
       flex: 1,
@@ -355,11 +585,11 @@ const createStyles = (theme: any) =>
     },
     orderContent: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      alignItems: 'center',
     },
     orderImage: {
-      width: 64,
-      height: 64,
+      width: 70,
+      height: 70,
       borderRadius: 12,
       backgroundColor: theme?.surface ?? '#f3f4f6',
       marginRight: 16,
@@ -371,37 +601,39 @@ const createStyles = (theme: any) =>
       flexDirection: 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
-      marginBottom: 8,
+      marginBottom: 6,
     },
     orderProduct: {
       fontSize: 16,
-      fontWeight: '600',
+      fontWeight: '700',
       color: theme?.text ?? '#1a1d21',
       flex: 1,
       marginRight: 12,
-      lineHeight: 22,
     },
     statusBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
       paddingVertical: 4,
-      borderRadius: 16,
+      borderRadius: 8,
     },
     statusText: {
-      fontSize: 12,
-      fontWeight: '600',
+      fontSize: 11,
+      fontWeight: '700',
       marginLeft: 4,
+      textTransform: 'uppercase',
     },
     orderMeta: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: 12,
+      marginBottom: 10,
     },
     customerInfo: {
       flexDirection: 'row',
       alignItems: 'center',
+      flex: 1,
+      paddingRight: 10,
     },
     customerName: {
       fontSize: 14,
@@ -409,35 +641,190 @@ const createStyles = (theme: any) =>
       marginLeft: 6,
     },
     orderId: {
-      fontSize: 14,
-      color: theme?.textSecondary ?? '#6b7280',
-      fontWeight: '500',
+      fontSize: 13,
+      color: theme?.textTertiary ?? '#9ca3af',
+      fontWeight: '600',
     },
-    actionButtons: {
-      // Container for action buttons
-    },
-    actionButton: {
+    manageButton: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      borderRadius: 8,
-      alignSelf: 'flex-start',
+      backgroundColor: 'rgba(75, 86, 233, 0.08)',
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(75, 86, 233, 0.2)',
+      marginTop: 4,
     },
-    shipButton: {
-      backgroundColor: '#3B82F6',
-    },
-    completeButton: {
-      backgroundColor: '#10B981',
-    },
-    actionButtonText: {
-      color: '#fff',
+    manageButtonText: {
+      color: brandColor,
       fontSize: 14,
-      fontWeight: '600',
-      marginLeft: 6,
+      fontWeight: '700',
+      marginRight: 6,
+      letterSpacing: 0.3,
     },
     bottomSpacer: {
       height: 100,
     },
+
+    // --- Modal Styles ---
+    fullScreenModal: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    fullScreenModalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: Platform.OS === 'ios' ? 10 : 20, 
+      paddingBottom: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    fullScreenModalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme.text,
+    },
+    modalCloseButton: {
+      width: 40,
+      height: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.surface,
+      borderRadius: 20,
+    },
+    modalScrollContent: {
+      flex: 1,
+      padding: 24,
+    },
+    modalImageContainer: {
+      alignItems: 'center',
+      marginBottom: 24,
+      position: 'relative',
+    },
+    modalImage: {
+      width: width * 0.45,
+      height: width * 0.45,
+      borderRadius: 24,
+      backgroundColor: theme.surface,
+    },
+    modalStatusBadge: {
+      position: 'absolute',
+      bottom: -10,
+      paddingHorizontal: 16,
+      paddingVertical: 6,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: theme.background,
+    },
+    modalStatusText: {
+      color: '#fff',
+      fontWeight: '800',
+      fontSize: 12,
+      letterSpacing: 1,
+    },
+    modalProductName: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: theme.text,
+      textAlign: 'center',
+      marginBottom: 32,
+    },
+    detailsBox: {
+      backgroundColor: theme.surface,
+      borderRadius: 16,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    modalDetailRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    modalLabel: {
+      fontSize: 15,
+      color: theme.textSecondary,
+      fontWeight: '500',
+    },
+    modalValue: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.text,
+    },
+    modalValuePrice: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: brandColor,
+    },
+    modalActionButtons: {
+      flexDirection: 'column',
+      marginTop: 32,
+      gap: 12,
+    },
+    modalPrimaryBtn: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderRadius: 14,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    modalPrimaryBtnText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '700',
+      marginLeft: 8,
+    },
+    modalSecondaryBtn: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderRadius: 14,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderColor: 'rgba(75, 86, 233, 0.3)',
+    },
+    modalSecondaryBtnText: {
+      color: brandColor,
+      fontSize: 16,
+      fontWeight: '700',
+      marginLeft: 8,
+    },
+    modalDestructiveBtn: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderRadius: 14,
+      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+      marginTop: 10,
+    },
+    modalDestructiveBtnText: {
+      color: '#EF4444',
+      fontSize: 15,
+      fontWeight: '700',
+      marginLeft: 8,
+    },
+
+    // Alert Modals
+    modalOverlayAlert: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
+    modalAlertContainer: { backgroundColor: theme.card || "#fff", borderRadius: 24, padding: 24, width: '100%', maxWidth: 320, borderWidth: 1, borderColor: theme.border || "#e1e5e9", shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 20 },
+    modalAlertTitle: { fontSize: 20, fontWeight: 'bold', color: theme.text || "#000", marginBottom: 8, textAlign: 'center' },
+    modalAlertMessage: { fontSize: 15, color: theme.textSecondary || "#666", marginBottom: 24, textAlign: 'center', lineHeight: 22 },
+    modalAlertButtonGroup: { flexDirection: 'column', gap: 12 },
+    modalAlertBtn: { paddingVertical: 14, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    modalAlertBtnDefault: { backgroundColor: brandColor },
+    modalAlertBtnDestructive: { backgroundColor: '#EF4444' },
+    modalAlertBtnCancel: { backgroundColor: theme.surface || "#f0f0f0", borderWidth: 1, borderColor: theme.border || "#e1e5e9" },
+    modalAlertBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
   });

@@ -55,7 +55,7 @@ export default function ShippingScreen() {
     middleName: "",
     email: "",
     phone: "",
-    country: { code: 'NG', name: 'Nigeria', flag: '🇳🇬' },
+    country: { code: 'JM', name: 'Jamaica', flag: '🇯🇲' },
     addressLine1: "",
     addressLine2: "",
     city: "",
@@ -346,7 +346,7 @@ export default function ShippingScreen() {
                 <Text style={styles.inputLabel}>State/Province *</Text>
                 <TextInput
                   style={[styles.input, errors.state && styles.inputError]}
-                  placeholder="State/Province"
+                  placeholder="State"
                   placeholderTextColor={theme?.textSecondary ?? "#999"}
                   value={form.state}
                   onChangeText={(v) => handleChange("state", v)}
@@ -444,6 +444,7 @@ const createStyles = (theme: any) =>
       backgroundColor: theme?.background ?? "#fff",
       borderBottomWidth: 1,
       borderBottomColor: theme?.border ?? "#e1e5e9",
+      marginTop: 22,
     },
     backBtn: {
       padding: 8,
@@ -583,6 +584,7 @@ const createStyles = (theme: any) =>
       backgroundColor: theme?.background ?? "#fff",
       paddingHorizontal: 20,
       paddingTop: 16,
+      
       
       borderTopWidth: 1,
       borderTopColor: theme?.border ?? "#e1e5e9",

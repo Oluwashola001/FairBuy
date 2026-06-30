@@ -271,6 +271,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
+    marginTop: 42,
   },
   backButton: {
     width: 40,

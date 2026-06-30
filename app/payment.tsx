@@ -3,9 +3,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -17,6 +18,8 @@ import {
 import { supabase } from "../lib/supabase";
 import { useCart } from "./contexts/CartContext";
 import { useTheme } from "./contexts/ThemeContext";
+
+const brandColor = "#4B56E9";
 
 export default function PaymentScreen() {
   const router = useRouter();
@@ -34,6 +37,25 @@ export default function PaymentScreen() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // --- Global Custom Modal State ---
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({ visible: false, title: '', message: '' });
+
+  const showAlert = (title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({
+      visible: true,
+      title,
+      message,
+      buttons: buttons || [{ text: 'OK', onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })), style: 'default' }]
+    });
+  };
+
+  const hideAlert = () => setAlertConfig(prev => ({ ...prev, visible: false }));
 
   // Calculate totals
   const subtotal = cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
@@ -106,7 +128,6 @@ export default function PaymentScreen() {
 
     setCardForm(prev => ({ ...prev, [field]: formattedValue }));
     
-    // Clear error when user starts typing
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: "" }));
     }
@@ -114,17 +135,17 @@ export default function PaymentScreen() {
 
   const handlePay = async () => {
     if (method === "card" && !validateCardForm()) {
-      Alert.alert("Validation Error", "Please correct the errors and try again.");
+      showAlert("Validation Error", "Please correct the errors and try again.");
       return;
     }
 
     setIsProcessing(true);
 
     try {
-      // 1. Get the securely logged-in user
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      // 1. Strict Session Check
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      if (authError || !user) {
+      if (sessionError || !session?.user) {
         throw new Error("You must be logged in to place an order.");
       }
 
@@ -132,26 +153,35 @@ export default function PaymentScreen() {
          throw new Error("Your cart is empty.");
       }
 
-      // 2. Figure out the buyer's name
-      const buyerName = user.user_metadata?.full_name || user.user_metadata?.storeName || user.email?.split('@')[0] || "Anonymous Buyer";
+      const user = session.user;
+
+      // 2. Profiles-First Architecture: Fetch verified username for order attribution
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('username, full_name')
+        .eq('id', user.id)
+        .single();
+
+      // Gracefully fall back if profile data is missing or incomplete
+      const buyerName = profileData?.username || profileData?.full_name || user.email?.split('@')[0] || "Anonymous Buyer";
 
       // 3. Format the cart items to match the Supabase 'orders' table
       const ordersToInsert = cart.map((item: any) => ({
         product_name: item.name,
         product_image: item.image || null, 
-        buyer_name: buyerName,
-        buyer_id: user.id, // NEW: Crucial for the buyer to see their own orders!
-        total_price: (item.price || 0) * (item.quantity || 1), // NEW: Save the actual cost
+        buyer_name: buyerName, // Using verified Profiles table identity
+        buyer_id: user.id, 
+        total_price: (item.price || 0) * (item.quantity || 1), 
         status: 'Pending',
         seller_id: item.seller_id || null 
       }));
 
       // 4. Send the orders to the database!
-      const { error } = await supabase
+      const { error: insertError } = await supabase
         .from('orders')
         .insert(ordersToInsert);
 
-      if (error) throw error;
+      if (insertError) throw insertError;
 
       // 5. Success! Clear the cart and navigate to the success screen
       if (clearCart) {
@@ -163,7 +193,7 @@ export default function PaymentScreen() {
 
     } catch (error: any) {
       console.error("Payment/Database Error:", error);
-      Alert.alert("Order Failed", error.message || "We could not process your order. Please try again.");
+      showAlert("Order Failed", error.message || "We could not process your order. Please try again.");
       setIsProcessing(false);
     }
   };
@@ -172,6 +202,39 @@ export default function PaymentScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Global Custom UI Modal for Alerts */}
+      <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={hideAlert}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalAlertContainer}>
+            <Text style={styles.modalAlertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalAlertMessage}>{alertConfig.message}</Text>
+            <View style={styles.modalAlertButtonGroup}>
+              {alertConfig.buttons?.map((btn, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => {
+                    hideAlert();
+                    if (btn.onPress) setTimeout(btn.onPress, 100);
+                  }}
+                  style={[
+                    styles.modalAlertBtn,
+                    btn.style === 'destructive' ? styles.modalAlertBtnDestructive : 
+                    btn.style === 'cancel' ? styles.modalAlertBtnCancel : styles.modalAlertBtnDefault
+                  ]}
+                >
+                  <Text style={[
+                    styles.modalAlertBtnText,
+                    btn.style === 'cancel' ? { color: theme.text } : { color: '#fff' }
+                  ]}>
+                    {btn.text}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <KeyboardAvoidingView 
         style={styles.keyboardView} 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -189,7 +252,7 @@ export default function PaymentScreen() {
           {/* Order Summary */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="receipt-outline" size={20} color={theme?.brandColor ?? "#4B56E9"} />
+              <Ionicons name="receipt-outline" size={20} color={brandColor} />
               <Text style={styles.sectionTitle}>Order Summary</Text>
             </View>
             
@@ -215,7 +278,7 @@ export default function PaymentScreen() {
           {/* Payment Methods */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="card-outline" size={20} color={theme?.brandColor ?? "#4B56E9"} />
+              <Ionicons name="card-outline" size={20} color={brandColor} />
               <Text style={styles.sectionTitle}>Payment Method</Text>
             </View>
 
@@ -224,13 +287,14 @@ export default function PaymentScreen() {
               <TouchableOpacity
                 style={[styles.methodCard, method === "card" && styles.methodActive]}
                 onPress={() => setMethod("card")}
+                activeOpacity={0.8}
               >
                 <View style={styles.methodLeft}>
                   <View style={[styles.methodIcon, method === "card" && styles.methodIconActive]}>
                     <Ionicons 
                       name="card-outline" 
                       size={20} 
-                      color={method === "card" ? "#fff" : theme?.brandColor ?? "#4B56E9"} 
+                      color={method === "card" ? "#fff" : brandColor} 
                     />
                   </View>
                   <Text style={[styles.methodText, method === "card" && styles.methodTextActive]}>Credit / Debit Card</Text>
@@ -245,13 +309,14 @@ export default function PaymentScreen() {
               <TouchableOpacity
                 style={[styles.methodCard, method === "applepay" && styles.methodActive]}
                 onPress={() => setMethod("applepay")}
+                activeOpacity={0.8}
               >
                 <View style={styles.methodLeft}>
                   <View style={[styles.methodIcon, method === "applepay" && styles.methodIconActive]}>
                     <Ionicons 
                       name="logo-apple" 
                       size={20} 
-                      color={method === "applepay" ? "#fff" : theme?.brandColor ?? "#4B56E9"} 
+                      color={method === "applepay" ? "#fff" : brandColor} 
                     />
                   </View>
                   <Text style={[styles.methodText, method === "applepay" && styles.methodTextActive]}>Apple Pay</Text>
@@ -263,13 +328,14 @@ export default function PaymentScreen() {
               <TouchableOpacity
                 style={[styles.methodCard, method === "googlepay" && styles.methodActive]}
                 onPress={() => setMethod("googlepay")}
+                activeOpacity={0.8}
               >
                 <View style={styles.methodLeft}>
                   <View style={[styles.methodIcon, method === "googlepay" && styles.methodIconActive]}>
                     <Ionicons 
                       name="logo-google" 
                       size={20} 
-                      color={method === "googlepay" ? "#fff" : theme?.brandColor ?? "#4B56E9"} 
+                      color={method === "googlepay" ? "#fff" : brandColor} 
                     />
                   </View>
                   <Text style={[styles.methodText, method === "googlepay" && styles.methodTextActive]}>Google Pay</Text>
@@ -281,6 +347,7 @@ export default function PaymentScreen() {
               <TouchableOpacity
                 style={[styles.methodCard, method === "paypal" && styles.methodActive]}
                 onPress={() => setMethod("paypal")}
+                activeOpacity={0.8}
               >
                 <View style={styles.methodLeft}>
                   <View style={[styles.methodIcon, method === "paypal" && styles.methodIconActive]}>
@@ -298,13 +365,14 @@ export default function PaymentScreen() {
               <TouchableOpacity
                 style={[styles.methodCard, method === "cod" && styles.methodActive]}
                 onPress={() => setMethod("cod")}
+                activeOpacity={0.8}
               >
                 <View style={styles.methodLeft}>
                   <View style={[styles.methodIcon, method === "cod" && styles.methodIconActive]}>
                     <Ionicons 
                       name="cash-outline" 
                       size={20} 
-                      color={method === "cod" ? "#fff" : theme?.brandColor ?? "#4B56E9"} 
+                      color={method === "cod" ? "#fff" : brandColor} 
                     />
                   </View>
                   <Text style={[styles.methodText, method === "cod" && styles.methodTextActive]}>Cash on Delivery</Text>
@@ -318,7 +386,7 @@ export default function PaymentScreen() {
           {method === "card" && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="lock-closed-outline" size={20} color={theme?.brandColor ?? "#4B56E9"} />
+                <Ionicons name="lock-closed-outline" size={20} color={brandColor} />
                 <Text style={styles.sectionTitle}>Card Details</Text>
                 <View style={styles.securityBadge}>
                   <Ionicons name="shield-checkmark" size={12} color="#10b981" />
@@ -460,6 +528,67 @@ const createStyles = (theme: any) =>
     keyboardView: {
       flex: 1,
     },
+    // Custom Modal Styles
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+    },
+    modalAlertContainer: {
+      backgroundColor: theme?.card ?? "#fff",
+      borderRadius: 24,
+      padding: 24,
+      width: '100%',
+      maxWidth: 320,
+      borderWidth: 1,
+      borderColor: theme?.border ?? "#e1e5e9",
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.25,
+      shadowRadius: 16,
+      elevation: 20,
+    },
+    modalAlertTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme?.text ?? "#000",
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    modalAlertMessage: {
+      fontSize: 15,
+      color: theme?.textSecondary ?? "#666",
+      marginBottom: 24,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    modalAlertButtonGroup: {
+      flexDirection: 'column',
+      gap: 12,
+    },
+    modalAlertBtn: {
+      paddingVertical: 14,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalAlertBtnDefault: {
+      backgroundColor: brandColor,
+    },
+    modalAlertBtnDestructive: {
+      backgroundColor: '#EF4444',
+    },
+    modalAlertBtnCancel: {
+      backgroundColor: theme?.surface ?? "#f0f0f0",
+      borderWidth: 1,
+      borderColor: theme?.border ?? "#e1e5e9",
+    },
+    modalAlertBtnText: {
+      fontSize: 16,
+      fontWeight: '700',
+    },
     header: {
       flexDirection: "row",
       alignItems: "center",
@@ -468,6 +597,7 @@ const createStyles = (theme: any) =>
       backgroundColor: theme?.background ?? "#fff",
       borderBottomWidth: 1,
       borderBottomColor: theme?.border ?? "#e1e5e9",
+      marginTop: 42,
     },
     backBtn: {
       padding: 8,
@@ -552,7 +682,7 @@ const createStyles = (theme: any) =>
     summaryTotalValue: {
       fontSize: 18,
       fontWeight: "700",
-      color: theme?.brandColor ?? "#4B56E9",
+      color: brandColor,
     },
     // Payment Methods
     paymentMethods: {
@@ -569,8 +699,8 @@ const createStyles = (theme: any) =>
       backgroundColor: theme?.surface ?? "#fff",
     },
     methodActive: {
-      borderColor: theme?.brandColor ?? "#4B56E9",
-      backgroundColor: theme?.brandColor ? `${theme.brandColor}10` : "#4B56E910",
+      borderColor: brandColor,
+      backgroundColor: `${brandColor}10`,
     },
     methodLeft: {
       flexDirection: "row",
@@ -587,7 +717,7 @@ const createStyles = (theme: any) =>
       marginRight: 12,
     },
     methodIconActive: {
-      backgroundColor: theme?.brandColor ?? "#4B56E9",
+      backgroundColor: brandColor,
     },
     methodText: {
       fontSize: 16,
@@ -597,7 +727,7 @@ const createStyles = (theme: any) =>
     methodTextActive: {
       fontSize: 16,
       fontWeight: "600",
-      color: theme?.brandColor ?? "#4B56E9",
+      color: brandColor,
     },
     methodRight: {
       flexDirection: "row",
@@ -630,7 +760,7 @@ const createStyles = (theme: any) =>
       borderRadius: 16,
       padding: 20,
       marginBottom: 20,
-      backgroundColor: theme?.brandColor ?? "#4B56E9",
+      backgroundColor: brandColor,
     },
     cardPreviewHeader: {
       flexDirection: "row",
@@ -710,7 +840,7 @@ const createStyles = (theme: any) =>
       backgroundColor: theme?.background ?? "#fff",
       paddingHorizontal: 20,
       paddingTop: 16,
-      paddingBottom: 12,
+      paddingBottom: 24,
       borderTopWidth: 1,
       borderTopColor: theme?.border ?? "#e1e5e9",
       shadowColor: "#000",
@@ -720,13 +850,13 @@ const createStyles = (theme: any) =>
       elevation: 10,
     },
     payBtn: {
-      backgroundColor: theme?.brandColor ?? "#4B56E9",
+      backgroundColor: brandColor,
       paddingVertical: 16,
       borderRadius: 12,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      shadowColor: theme?.brandColor ?? "#4B56E9",
+      shadowColor: brandColor,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.3,
       shadowRadius: 8,

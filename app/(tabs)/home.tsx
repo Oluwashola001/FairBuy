@@ -1,15 +1,17 @@
 // app/(tabs)/home.tsx
-import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
-  FlatList,
   Image,
   Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,121 +20,37 @@ import {
   View
 } from 'react-native';
 import Toast from 'react-native-toast-message';
+import { supabase } from '../../lib/supabase';
 import { useCart } from "../contexts/CartContext";
-
-// Import theme context
 import { useTheme } from '../contexts/ThemeContext';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const brandColor = '#4B56E9';
-
-// Dummy product data with all categories (kept for beautification)
-const hardcodedProducts = [
-  // Electronic
-  { id: 1, name: 'iPhone 14 Pro Max', price: 799, category: 'Electronic', image: null, rating: 4.8, reviews: 234, discount: 10 },
-  { id: 2, name: 'PlayStation 5', price: 399, category: 'Electronic', image: null, rating: 4.9, reviews: 567, discount: 0 },
-  { id: 3, name: 'Samsung Galaxy Watch', price: 299, category: 'Electronic', image: null, rating: 4.6, reviews: 123, discount: 15 },
-  { id: 4, name: 'MacBook Air M2', price: 1199, category: 'Electronic', image: null, rating: 4.7, reviews: 89, discount: 8 },
-  { id: 5, name: 'AirPods Pro', price: 249, category: 'Electronic', image: null, rating: 4.5, reviews: 456, discount: 20 },
-  { id: 6, name: 'iPad Pro 12.9"', price: 899, category: 'Electronic', image: null, rating: 4.8, reviews: 178, discount: 12 },
-  
-  // Fashion
-  { id: 7, name: 'Designer Sneakers', price: 150, category: 'Fashion', image: null, rating: 4.4, reviews: 78, discount: 25 },
-  { id: 8, name: 'Leather Jacket', price: 89, category: 'Fashion', image: null, rating: 4.6, reviews: 145, discount: 0 },
-  { id: 9, name: 'Summer Dress', price: 45, category: 'Fashion', image: null, rating: 4.3, reviews: 67, discount: 30 },
-  { id: 10, name: 'Denim Jeans', price: 65, category: 'Fashion', image: null, rating: 4.5, reviews: 234, discount: 15 },
-  { id: 11, name: 'Silk Scarf', price: 35, category: 'Fashion', image: null, rating: 4.2, reviews: 45, discount: 0 },
-  { id: 12, name: 'Winter Coat', price: 120, category: 'Fashion', image: null, rating: 4.7, reviews: 89, discount: 18 },
-  
-  // Beauty
-  { id: 13, name: 'Skincare Set', price: 75, category: 'Beauty', image: null, rating: 4.8, reviews: 189, discount: 22 },
-  { id: 14, name: 'Makeup Palette', price: 55, category: 'Beauty', image: null, rating: 4.7, reviews: 156, discount: 0 },
-  { id: 15, name: 'Hair Serum', price: 25, category: 'Beauty', image: null, rating: 4.4, reviews: 78, discount: 35 },
-  { id: 16, name: 'Face Mask Set', price: 30, category: 'Beauty', image: null, rating: 4.6, reviews: 123, discount: 20 },
-  { id: 17, name: 'Perfume Collection', price: 120, category: 'Beauty', image: null, rating: 4.5, reviews: 89, discount: 10 },
-  { id: 18, name: 'Lip Gloss Set', price: 40, category: 'Beauty', image: null, rating: 4.3, reviews: 145, discount: 15 },
-  
-  // Health
-  { id: 19, name: 'Vitamin C Supplement', price: 25, category: 'Health', image: null, rating: 4.6, reviews: 234, discount: 0 },
-  { id: 20, name: 'Protein Powder', price: 60, category: 'Health', image: null, rating: 4.7, reviews: 156, discount: 20 },
-  { id: 21, name: 'First Aid Kit', price: 35, category: 'Health', image: null, rating: 4.4, reviews: 89, discount: 15 },
-  { id: 22, name: 'Blood Pressure Monitor', price: 85, category: 'Health', image: null, rating: 4.8, reviews: 67, discount: 12 },
-  
-  // Sports
-  { id: 23, name: 'Basketball', price: 40, category: 'Sports', image: null, rating: 4.5, reviews: 123, discount: 0 },
-  { id: 24, name: 'Tennis Racket', price: 120, category: 'Sports', image: null, rating: 4.7, reviews: 89, discount: 18 },
-  { id: 25, name: 'Soccer Ball', price: 30, category: 'Sports', image: null, rating: 4.6, reviews: 234, discount: 25 },
-  { id: 26, name: 'Golf Club Set', price: 350, category: 'Sports', image: null, rating: 4.8, reviews: 45, discount: 10 },
-  
-  // Fitness
-  { id: 27, name: 'Yoga Mat', price: 25, category: 'Fitness', image: null, rating: 4.4, reviews: 178, discount: 20 },
-  { id: 28, name: 'Dumbbells Set', price: 80, category: 'Fitness', image: null, rating: 4.6, reviews: 123, discount: 15 },
-  { id: 29, name: 'Resistance Bands', price: 20, category: 'Fitness', image: null, rating: 4.3, reviews: 156, discount: 30 },
-  { id: 30, name: 'Exercise Bike', price: 299, category: 'Fitness', image: null, rating: 4.7, reviews: 67, discount: 12 },
-  
-  // Appliance
-  { id: 31, name: 'Coffee Maker', price: 89, category: 'Appliance', image: null, rating: 4.5, reviews: 234, discount: 0 },
-  { id: 32, name: 'Air Fryer', price: 120, category: 'Appliance', image: null, rating: 4.8, reviews: 189, discount: 22 },
-  { id: 33, name: 'Blender', price: 65, category: 'Appliance', image: null, rating: 4.4, reviews: 145, discount: 18 },
-  { id: 34, name: 'Microwave Oven', price: 180, category: 'Appliance', image: null, rating: 4.6, reviews: 78, discount: 15 },
-  
-  // Jewelry
-  { id: 35, name: 'Diamond Ring', price: 899, category: 'Jewelry', image: null, rating: 4.9, reviews: 45, discount: 0 },
-  { id: 36, name: 'Gold Necklace', price: 299, category: 'Jewelry', image: null, rating: 4.7, reviews: 89, discount: 10 },
-  { id: 37, name: 'Silver Bracelet', price: 120, category: 'Jewelry', image: null, rating: 4.5, reviews: 123, discount: 25 },
-  { id: 38, name: 'Pearl Earrings', price: 199, category: 'Jewelry', image: null, rating: 4.6, reviews: 67, discount: 15 },
-  
-  // Furniture
-  { id: 39, name: 'Ergonomic Chair', price: 230, category: 'Furniture', image: null, rating: 4.7, reviews: 89, discount: 15 },
-  { id: 40, name: 'Coffee Table', price: 180, category: 'Furniture', image: null, rating: 4.6, reviews: 156, discount: 20 },
-  { id: 41, name: 'Bookshelf', price: 150, category: 'Furniture', image: null, rating: 4.4, reviews: 234, discount: 18 },
-  { id: 42, name: 'Dining Set', price: 450, category: 'Furniture', image: null, rating: 4.8, reviews: 67, discount: 12 },
-  
-  // Gaming
-  { id: 43, name: 'Gaming Headset', price: 89, category: 'Gaming', image: null, rating: 4.6, reviews: 234, discount: 20 },
-  { id: 44, name: 'Mechanical Keyboard', price: 120, category: 'Gaming', image: null, rating: 4.7, reviews: 145, discount: 15 },
-  { id: 45, name: 'Gaming Mouse', price: 65, category: 'Gaming', image: null, rating: 4.5, reviews: 189, discount: 25 },
-  { id: 46, name: 'Gaming Chair', price: 299, category: 'Gaming', image: null, rating: 4.8, reviews: 78, discount: 10 }
-];
 
 const categories = ['Home', 'Electronic', 'Fashion', 'Beauty', 'Health', 'Sports', 'Fitness', 'Appliance', 'Jewelry', 'Furniture', 'Gaming'];
 
-// Animated Hand Wave Component
+// Memory leak cleanup added to animations to prevent hanging on navigation
 const AnimatedHandWave = () => {
   const waveAnimation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     const startWaveAnimation = () => {
       Animated.sequence([
-        Animated.timing(waveAnimation, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(waveAnimation, {
-          toValue: -1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(waveAnimation, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(waveAnimation, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
+        Animated.timing(waveAnimation, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(waveAnimation, { toValue: -1, duration: 300, useNativeDriver: true }),
+        Animated.timing(waveAnimation, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(waveAnimation, { toValue: 0, duration: 300, useNativeDriver: true }),
       ]).start(() => {
-        // Repeat animation after 3 seconds
-        setTimeout(startWaveAnimation, 3000);
+        timeoutId = setTimeout(startWaveAnimation, 3000);
       });
     };
 
-    // Start initial animation after 1 second
-    setTimeout(startWaveAnimation, 1000);
-  }, []);
+    timeoutId = setTimeout(startWaveAnimation, 1000);
+    
+    return () => clearTimeout(timeoutId); // Cleanup
+  }, [waveAnimation]);
 
   const rotateInterpolate = waveAnimation.interpolate({
     inputRange: [-1, 0, 1],
@@ -140,104 +58,64 @@ const AnimatedHandWave = () => {
   });
 
   return (
-    <Animated.Text
-      style={{
-        transform: [{ rotate: rotateInterpolate }],
-        fontSize: 28,
-        marginLeft: 5,
-      }}
-    >
+    <Animated.Text style={{ transform: [{ rotate: rotateInterpolate }], fontSize: 24, marginLeft: 5 }}>
       👋
     </Animated.Text>
   );
 };
 
-// Animated Discount Badge Component
 const AnimatedDiscountBadge = ({ discount, styles }: any) => {
   const pulseAnimation = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    const startPulseAnimation = () => {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnimation, {
-            toValue: 1.1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnimation, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    };
-
-    startPulseAnimation();
-  }, []);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnimation, { toValue: 1.1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnimation, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop(); 
+  }, [pulseAnimation]);
 
   return (
-    <Animated.View
-      style={[
-        styles.discountBadge,
-        {
-          transform: [{ scale: pulseAnimation }],
-        },
-      ]}
-    >
+    <Animated.View style={[styles.discountBadge, { transform: [{ scale: pulseAnimation }] }]}>
       <Text style={styles.discountText}>-{discount}%</Text>
     </Animated.View>
   );
 };
 
-// Animated Chat Support FAB Component
+// Create an Animated version of TouchableOpacity
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
 const AnimatedChatFAB = ({ style, children, ...props }: any) => {
   const bounceAnimation = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     const startBounceAnimation = () => {
       Animated.sequence([
-        Animated.timing(bounceAnimation, {
-          toValue: 0.9,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.spring(bounceAnimation, {
-          toValue: 1.1,
-          friction: 3,
-          tension: 200,
-          useNativeDriver: true,
-        }),
-        Animated.spring(bounceAnimation, {
-          toValue: 1,
-          friction: 5,
-          tension: 200,
-          useNativeDriver: true,
-        }),
+        Animated.timing(bounceAnimation, { toValue: 0.9, duration: 100, useNativeDriver: true }),
+        Animated.spring(bounceAnimation, { toValue: 1.1, friction: 3, tension: 200, useNativeDriver: true }),
+        Animated.spring(bounceAnimation, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }),
       ]).start(() => {
-        // Repeat animation every 5 seconds
-        setTimeout(startBounceAnimation, 5000);
+        timeoutId = setTimeout(startBounceAnimation, 5000);
       });
     };
 
-    // Start bounce animation after 2 seconds
-    setTimeout(startBounceAnimation, 2000);
-  }, []);
+    timeoutId = setTimeout(startBounceAnimation, 2000);
+    return () => clearTimeout(timeoutId); 
+  }, [bounceAnimation]);
 
   return (
-    <TouchableOpacity {...props}>
-      <Animated.View
-        style={[
-          style,
-          {
-            transform: [{ scale: bounceAnimation }],
-          },
-        ]}
-      >
-        {children}
-      </Animated.View>
-    </TouchableOpacity>
+    <AnimatedTouchableOpacity 
+      style={[style, { transform: [{ scale: bounceAnimation }] }]} 
+      {...props} 
+      activeOpacity={0.9}
+    >
+      {children}
+    </AnimatedTouchableOpacity>
   );
 };
 
@@ -248,22 +126,19 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }: any) => {
     {
       title: "View Profile",
       description: "Your uploaded image and profile details will appear here",
-      element: "profile",
-      position: { top: 135, right: 2 },
+      position: { top: 60, right: 20 },
       arrowDirection: "topRight"
     },
     {
       title: "Chat With Support", 
       description: "Get help through FairTrade's secure support chat",
-      element: "escrobond",
-      position: { bottom: 172, right: 2 },
+      position: { bottom: 100, right: 20 },
       arrowDirection: "bottomRight"
     },
     {
       title: "Home Button",
       description: "Quickly return to your main hub with the Home button",
-      element: "chat",
-      position: { bottom: 80, left: 2 },
+      position: { bottom: 100, left: 20 },
       arrowDirection: "bottomLeft"
     }
   ];
@@ -271,53 +146,12 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }: any) => {
   const currentStep = steps[step];
 
   const getArrowStyle = (direction: string) => {
-    const baseArrow = {
-      position: 'absolute' as const,
-      width: 0,
-      height: 0,
-      backgroundColor: 'transparent',
-      borderStyle: 'solid' as const,
-    };
-
+    const baseArrow = { position: 'absolute' as const, width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid' as const };
     switch (direction) {
-      case 'topRight':
-        return {
-          ...baseArrow,
-          top: -10,
-          right: 30,
-          borderLeftWidth: 10,
-          borderRightWidth: 10,
-          borderBottomWidth: 10,
-          borderLeftColor: 'transparent',
-          borderRightColor: 'transparent',
-          borderBottomColor: theme.card,
-        };
-      case 'bottomRight':
-        return {
-          ...baseArrow,
-          bottom: -10,
-          right: 30,
-          borderLeftWidth: 10,
-          borderRightWidth: 10,
-          borderTopWidth: 10,
-          borderLeftColor: 'transparent',
-          borderRightColor: 'transparent',
-          borderTopColor: theme.card,
-        };
-      case 'bottomLeft':
-        return {
-          ...baseArrow,
-          bottom: -10,
-          left: 30,
-          borderLeftWidth: 10,
-          borderRightWidth: 10,
-          borderTopWidth: 10,
-          borderLeftColor: 'transparent',
-          borderRightColor: 'transparent',
-          borderTopColor: theme.card,
-        };
-      default:
-        return baseArrow;
+      case 'topRight': return { ...baseArrow, top: -10, right: 30, borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 10, borderBottomColor: theme.card };
+      case 'bottomRight': return { ...baseArrow, bottom: -10, right: 30, borderLeftWidth: 10, borderRightWidth: 10, borderTopWidth: 10, borderTopColor: theme.card };
+      case 'bottomLeft': return { ...baseArrow, bottom: -10, left: 30, borderLeftWidth: 10, borderRightWidth: 10, borderTopWidth: 10, borderTopColor: theme.card };
+      default: return baseArrow;
     }
   };
 
@@ -328,7 +162,6 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }: any) => {
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={dynamicStyles.onboardingOverlay}>
-        {/* Positioned Tooltip */}
         <View style={[dynamicStyles.tooltipContainer, currentStep.position as any]}>
           <View style={getArrowStyle(currentStep.arrowDirection)} />
           <Text style={dynamicStyles.tooltipTitle}>{currentStep.title}</Text>
@@ -338,20 +171,12 @@ const OnboardingModal = ({ visible, step, onNext, onSkip }: any) => {
               <Text style={dynamicStyles.skipButtonText}>Skip</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={onNext} style={dynamicStyles.nextButton}>
-              <Text style={dynamicStyles.nextButtonText}>
-                {step === 2 ? 'Get Started' : 'Next'}
-              </Text>
+              <Text style={dynamicStyles.nextButtonText}>{step === 2 ? 'Get Started' : 'Next'}</Text>
             </TouchableOpacity>
           </View>
           <View style={dynamicStyles.stepIndicator}>
             {steps.map((_, index) => (
-              <View 
-                key={index} 
-                style={[
-                  dynamicStyles.stepDot, 
-                  index === step && dynamicStyles.activeStepDot
-                ]} 
-              />
+              <View key={index} style={[dynamicStyles.stepDot, index === step && dynamicStyles.activeStepDot]} />
             ))}
           </View>
         </View>
@@ -364,94 +189,108 @@ export default function HomeScreen() {
   const { addToCart } = useCart();
   const router = useRouter();
   const { theme, isDark } = useTheme();
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Home');
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
-  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false); 
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [favorites, setFavorites] = useState(new Set());
-  const [profileImage, setProfileImage] = useState('https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face');
   
-  // NEW: State for user-generated products
-  const [userProducts, setUserProducts] = useState<any[]>([]);
-  const [allProducts, setAllProducts] = useState(hardcodedProducts);
+  // --- Global Identity State ---
+  const [profileImage, setProfileImage] = useState('https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face');
+  const [userName, setUserName] = useState('Shopper');
+
+  // --- Modal State for Error Handling ---
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [modalMessage, setModalMessage] = useState("");
+  
+  // Loading & Refreshing States
+  const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   
   const categoryScrollRef = useRef(null);
-
-  // Create dynamic styles using theme
   const styles = createStyles(theme);
 
-  // Load user-generated products from Supabase Database
-  const loadUserProducts = async () => {
+  const fetchStoreData = async () => {
     try {
+      // 1. Strict Active Session Check
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) throw new Error('Authentication required.');
+
+      // 2. Fetch User Identity from Profiles Table (Profiles-First Architecture)
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('username, avatar_url')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!profileError && profileData) {
+        if (profileData.avatar_url) setProfileImage(profileData.avatar_url);
+        if (profileData.username) setUserName(profileData.username);
+      }
+
+      // 3. Fetch Real Products from Supabase (Newest First)
       const { data: products, error } = await supabase
         .from('products')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 
       if (products && products.length > 0) {
-        // Map database columns to match the frontend product card expectations
         const mappedProducts = products.map(p => ({
           ...p,
           id: p.id,
           name: p.name,
           price: p.price,
           category: p.category,
-          image: p.image_url, // map image_url to image
-          rating: 0,          // Add default values for UI rendering
-          reviews: 0,
-          discount: 0,
-          isUserGenerated: true 
+          image: p.image_url, 
+          rating: (Math.random() * (5 - 4) + 4).toFixed(1), // Mock rating until reviews table is built
+          reviews: Math.floor(Math.random() * 100) + 1,
+          discount: 0
         }));
 
-        setUserProducts(mappedProducts);
-        
-        // Combine user products (first) with hardcoded products (second)
-        const combinedProducts = [...mappedProducts, ...hardcodedProducts];
-        setAllProducts(combinedProducts);
+        setAllProducts(mappedProducts);
       } else {
-        // No user products, use only hardcoded
-        setAllProducts(hardcodedProducts);
-        setUserProducts([]);
+        setAllProducts([]);
       }
-    } catch (error) {
-      console.error('Error loading products from Supabase:', error);
-      // Fallback to hardcoded products
-      setAllProducts(hardcodedProducts);
-      setUserProducts([]);
+    } catch (error: any) {
+      console.error('Error fetching data:', error);
+      setModalMessage(error.message || "Failed to load home data.");
+      setIsModalVisible(true);
+      setAllProducts([]);
     }
   };
 
-  // Load profile image from Supabase Auth MetaData
-  const loadProfileImage = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.user_metadata?.avatar_url) {
-        setProfileImage(user.user_metadata.avatar_url);
-      }
-    } catch (error) {
-      console.error('Error loading profile image:', error);
-    }
-  };
-
-  // Load profile image and products when component mounts
+  // Initial Load
   useEffect(() => {
-    loadProfileImage();
-    loadUserProducts();
+    const init = async () => {
+      await fetchStoreData();
+      setInitialLoading(false);
+    };
+    init();
   }, []);
 
-  // Reload profile image and products when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      loadProfileImage();
-      loadUserProducts();
-    }, [])
+      if (!initialLoading) {
+          fetchStoreData();
+      }
+    }, [initialLoading])
   );
 
+  // Pull-to-refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchStoreData();
+    setRefreshing(false);
+  };
+
+  // Filtering Logic
   useEffect(() => {
-    // Filter products based on search and category
-    let filtered = allProducts; // Uses combined products (user + hardcoded)
+    let filtered = allProducts;
     
     if (searchQuery.trim()) {
       filtered = filtered.filter(product =>
@@ -459,26 +298,12 @@ export default function HomeScreen() {
       );
     }
     
-    // When Home is selected, show all products from all categories
-    // When other categories are selected, filter by that specific category
     if (selectedCategory !== 'Home') {
       filtered = filtered.filter(product => product.category === selectedCategory);
     }
     
     setFilteredProducts(filtered);
   }, [searchQuery, selectedCategory, allProducts]);
-
-  const handleNextOnboarding = () => {
-    if (onboardingStep < 2) {
-      setOnboardingStep(onboardingStep + 1);
-    } else {
-      setShowOnboarding(false);
-    }
-  };
-
-  const handleSkipOnboarding = () => {
-    setShowOnboarding(false);
-  };
 
   const toggleFavorite = (productId: any) => {
     const newFavorites = new Set(favorites);
@@ -490,26 +315,13 @@ export default function HomeScreen() {
     setFavorites(newFavorites);
   };
 
-  const isElementHighlighted = (elementType: string) => {
-    if (!showOnboarding) return false;
-    
-    switch (onboardingStep) {
-      case 0: return elementType === 'profile';
-      case 1: return elementType === 'escrobond' || elementType === 'fab';
-      case 2: return elementType === 'chat';
-      default: return false;
-    }
-  };
-
-  // UPDATED: Enhanced ProductCard component with proper navigation
-  const ProductCard = ({ product, addToCart }: any) => {
+  const ProductCard = ({ product }: any) => {
     const handleProductPress = () => {
-      // Navigate to product details screen with product data
       router.push(`/products/product-details?product=${encodeURIComponent(JSON.stringify(product))}`);
     };
 
     return (
-      <TouchableOpacity style={styles.productCard} onPress={handleProductPress}>
+      <TouchableOpacity style={styles.productCard} onPress={handleProductPress} activeOpacity={0.9}>
         <View style={styles.productImageContainer}>
           {product.image ? (
             <Image source={{ uri: product.image }} style={styles.productImage} />
@@ -518,56 +330,31 @@ export default function HomeScreen() {
               <Ionicons name="image-outline" size={24} color={theme.textTertiary} />
             </View>
           )}
-          {product.discount > 0 && (
-            <AnimatedDiscountBadge discount={product.discount} styles={styles} />
-          )}
-          {/* NEW: Badge for user-generated products */}
-          {product.isUserGenerated && (
-            <View style={styles.newProductBadge}>
-              <Text style={styles.newProductText}>NEW</Text>
-            </View>
-          )}
+          {product.discount > 0 && <AnimatedDiscountBadge discount={product.discount} styles={styles} />}
+          
           <TouchableOpacity 
             style={styles.favoriteButton}
             onPress={() => toggleFavorite(product.id)}
           >
-            <Ionicons 
-              name={favorites.has(product.id) ? "heart" : "heart-outline"} 
-              size={16} 
-              color={favorites.has(product.id) ? "#FF4444" : "#fff"} 
-            />
+            <Ionicons name={favorites.has(product.id) ? "heart" : "heart-outline"} size={16} color={favorites.has(product.id) ? "#FF4444" : "#fff"} />
           </TouchableOpacity>
         </View>
         <View style={styles.productInfo}>
           <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
           <View style={styles.ratingContainer}>
-            <Ionicons name="star" size={12} color="#FFD700" />
+            <Ionicons name="star" size={12} color="#F59E0B" />
             <Text style={styles.rating}>{product.rating}</Text>
-            <Text style={styles.reviews}>({product.reviews})</Text>
           </View>
           <View style={styles.priceRow}>
-            <View style={styles.priceContainer}>
-              {product.discount > 0 && (
-                <Text style={styles.originalPrice}>
-                  ${Math.round(product.price * (1 + product.discount / 100))}
-                </Text>
-              )}
-              <Text style={styles.productPrice}>${product.price}</Text>
-            </View>
+            <Text style={styles.productPrice}>${Number(product.price).toFixed(2)}</Text>
             <TouchableOpacity
               style={styles.addToCartButton}
               onPress={() => {
-                addToCart(product); // add product to cart
-                Toast.show({
-                  type: 'success',
-                  text1: 'Added to Cart',
-                  text2: `${product.name} has been added successfully.`,
-                  position: 'top',
-                  visibilityTime: 2000,
-                });
+                addToCart(product);
+                Toast.show({ type: 'success', text1: 'Added to Cart', text2: `${product.name} added.`, position: 'top', visibilityTime: 2000 });
               }}
             >
-              <Ionicons name="add" size={16} color={brandColor} />
+              <Ionicons name="add" size={16} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
@@ -580,256 +367,197 @@ export default function HomeScreen() {
       style={[styles.categoryChip, isSelected && styles.selectedCategoryChip]}
       onPress={onPress}
     >
-      <Text style={[styles.categoryText, isSelected && styles.selectedCategoryText]}>
-        {category}
-      </Text>
+      <Text style={[styles.categoryText, isSelected && styles.selectedCategoryText]}>{category}</Text>
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.mainContainer}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-      <View style={styles.topBar}>
-        <View style={styles.logoContainer}>
-          <Image source={require('@/assets/images/logo.png')} style={styles.logo} />
-          <Text style={styles.logoText}>FairTrade</Text>
+      <StatusBar style="light" />
+      
+      {/* --- Custom Error Modal --- */}
+      <Modal animationType="fade" transparent={true} visible={isModalVisible} onRequestClose={() => setIsModalVisible(false)}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 16 }}>
+          <View style={{ backgroundColor: theme.card, borderRadius: 24, padding: 24, width: '100%', maxWidth: 320, borderWidth: 1, borderColor: theme.border }}>
+            <Text style={{ color: theme.text, fontSize: 20, fontWeight: 'bold', marginBottom: 8 }}>Notice</Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 16, marginBottom: 24, lineHeight: 22 }}>{modalMessage}</Text>
+            <Pressable onPress={() => setIsModalVisible(false)} style={{ backgroundColor: brandColor, paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}>
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Got it</Text>
+            </Pressable>
+          </View>
         </View>
-        
-        <View style={styles.rightSection}>
-          <TouchableOpacity style={styles.notificationButton}>
-            <Ionicons name="notifications-outline" size={20} color={theme.textSecondary} />
-            <View style={styles.notificationBadge} />
-          </TouchableOpacity>
+      </Modal>
+
+      {/* Premium Integrated Header Background */}
+      <View style={styles.heroBackground} />
+
+      {/* Header Content */}
+      <View style={styles.headerContainer}>
+        <View style={styles.topBar}>
+          <View style={styles.logoContainer}>
+            <Image source={require('@/assets/images/logo.png')} style={styles.logo} />
+            <Text style={styles.logoText}>FairTrade</Text>
+          </View>
+          <View style={styles.rightSection}>
+            <TouchableOpacity style={styles.notificationButton}>
+              <Ionicons name="notifications-outline" size={24} color="#fff" />
+              <View style={styles.notificationBadge} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/profile')} style={styles.profileContainer}>
+              <Image source={{ uri: profileImage }} style={styles.profilePic} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.greetingRow}>
+          <Text style={styles.greeting}>Hey, {userName}</Text>
+          <AnimatedHandWave />
+        </View>
+        <Text style={styles.subGreeting}>Let's find your favorite deals today</Text>
+
+        <View style={styles.searchBar}>
+          <Ionicons name="search-outline" size={20} color={theme.textSecondary} style={styles.searchIconLeft} />
+          <TextInput
+            placeholder="Search products or services..."
+            placeholderTextColor={theme.textSecondary}
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={20} color={theme.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
-      {/* Blur overlay for non-highlighted elements */}
-      {showOnboarding && (
-        <View style={styles.blurOverlay} pointerEvents="none" />
-      )}
-      
+
       <ScrollView 
         style={styles.container}
         showsVerticalScrollIndicator={false}
-        bounces={true}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={brandColor} colors={[brandColor]} />
+        }
       >
-        {/* Header */}
-        <View style={[
-          styles.header,
-          showOnboarding && !isElementHighlighted('profile') && styles.blurredElement
-        ]}>
-          {/* Greeting with Animated Hand Wave */}
-          <View style={styles.greetingRow}>
-            <View style={styles.greetingContainer}>
-              <Text style={styles.greeting}>Hi, Welcome</Text>
-              <AnimatedHandWave />
-            </View>
-            
-            <TouchableOpacity 
-              style={[
-                styles.profileContainer,
-                isElementHighlighted('profile') && styles.highlightedElement
-              ]}
-              onPress={() => router.push('/profile')}
-            >
-              <Image 
-                source={{ uri: profileImage }} 
-                style={styles.profilePic} 
-              />
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.subGreeting}>Find your favorite deals</Text>
-
-          {/* Search Bar */}
-          <View style={styles.searchContainer}>
-            <View style={styles.searchBar}>
-              <Ionicons name="search-outline" size={20} color={theme.textTertiary} style={styles.searchIconLeft} />
-              <TextInput
-                placeholder="Search Product"
-                placeholderTextColor={theme.textTertiary}
-                style={styles.searchInput}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                returnKeyType="search"
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Ionicons name="close-circle" size={20} color={theme.textTertiary} />
-                </TouchableOpacity>
-              )}
-            </View>
-            <TouchableOpacity style={styles.filterButton}>
-              <Ionicons name="options-outline" size={20} color={brandColor} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* Categories */}
-        <View style={[
-          styles.section,
-          showOnboarding && styles.blurredElement
-        ]}>
-          <Text style={styles.sectionTitle}>Categories</Text>
-          <View style={styles.categoryScrollContainer}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.categoryList}
-              ref={categoryScrollRef}
-              scrollEventThrottle={16}
-            >
-              {categories.map((category, index) => (
-                <CategoryChip
-                  key={`${category}-${index}`}
-                  category={category}
-                  isSelected={selectedCategory === category}
-                  onPress={() => setSelectedCategory(category)}
-                />
-              ))}
-            </ScrollView>
-          </View>
+        <View style={styles.categorySection}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryList}
+            ref={categoryScrollRef}
+          >
+            {categories.map((category, index) => (
+              <CategoryChip
+                key={`${category}-${index}`}
+                category={category}
+                isSelected={selectedCategory === category}
+                onPress={() => setSelectedCategory(category)}
+              />
+            ))}
+          </ScrollView>
         </View>
 
-        {/* Featured Banner */}
-        {selectedCategory === 'Home' && (
-          <View style={[
-            styles.section,
-            showOnboarding && styles.blurredElement
-          ]}>
-            <View style={styles.featuredBanner}>
-              <View style={styles.bannerContent}>
-                <Text style={styles.bannerTitle}>Special Offers</Text>
-                <Text style={styles.bannerSubtitle}>Up to 50% off on selected items</Text>
-                <TouchableOpacity style={styles.bannerButton}>
-                  <Text style={styles.bannerButtonText}>Shop Now</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.bannerImagePlaceholder}>
-                <Ionicons name="gift-outline" size={40} color={brandColor} />
-              </View>
-            </View>
+        {initialLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={brandColor} />
+            <Text style={styles.loadingText}>Curating your products...</Text>
           </View>
-        )}
+        ) : (
+          <>
+            {/* Featured Banner */}
+            {selectedCategory === 'Home' && (
+              <View style={styles.section}>
+                <View style={styles.featuredBanner}>
+                  <View style={styles.bannerContent}>
+                    <Text style={styles.bannerTitle}>Special Offers</Text>
+                    <Text style={styles.bannerSubtitle}>Up to 50% off on selected items</Text>
+                    <TouchableOpacity style={styles.bannerButton}>
+                      <Text style={styles.bannerButtonText}>Shop Now</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.bannerImagePlaceholder}>
+                    <Ionicons name="gift" size={40} color="#fff" />
+                  </View>
+                </View>
+              </View>
+            )}
 
-        {/* Products Grid */}
-        <View style={[
-          styles.section,
-          showOnboarding && styles.blurredElement
-        ]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>
-              {selectedCategory === 'Home' ? 'Popular Items' : selectedCategory}
-              {/* Show count of user products if any */}
-              {userProducts.length > 0 && selectedCategory === 'Home' && (
-                <Text style={styles.newProductsCount}> ({userProducts.length} new)</Text>
+            {/* Products Grid */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>
+                  {selectedCategory === 'Home' ? 'Latest Products' : selectedCategory}
+                </Text>
+              </View>
+              
+              {filteredProducts.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="search-outline" size={48} color={theme.textTertiary} />
+                  <Text style={styles.emptyText}>No products found</Text>
+                  <Text style={styles.emptySubtext}>Try adjusting your search</Text>
+                </View>
+              ) : (
+                // Performance Fix: Replaced Flatlist with Flexbox map mapping
+                <View style={styles.productsGrid}>
+                  {filteredProducts.map((item) => (
+                    <View key={`prod_${item.id}`} style={styles.gridItemWrapper}>
+                       <ProductCard product={item} />
+                    </View>
+                  ))}
+                </View>
               )}
-            </Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <FlatList
-            data={filteredProducts}
-            renderItem={({ item }) => <ProductCard product={item} addToCart={addToCart} />}
-            keyExtractor={(item, index) =>
-              item.isUserGenerated ? `user_${item.id}_${index}` : `prod_${item.id}_${index}`
-            }
-            numColumns={2}
-            columnWrapperStyle={styles.productRow}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={false}
-            ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Ionicons name="search-outline" size={48} color={theme.textTertiary} />
-                <Text style={styles.emptyText}>No products found</Text>
-                <Text style={styles.emptySubtext}>Try adjusting your search</Text>
-              </View>
-            }
-          />
-        </View>
-
-        {/* Bottom Padding for FAB */}
+            </View>
+          </>
+        )}
         <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Floating Action Button for Chat Support */}
-      <AnimatedChatFAB 
-        style={[
-          styles.fab,
-          isElementHighlighted('fab') && styles.highlightedElement
-        ]}
-      >
+      <AnimatedChatFAB style={styles.fab} onPress={() => router.push('/help')}>
         <Ionicons name="headset-outline" size={24} color="#fff" />
       </AnimatedChatFAB>
 
-      {/* Onboarding Modal */}
       <OnboardingModal
         visible={showOnboarding}
         step={onboardingStep}
-        onNext={handleNextOnboarding}
-        onSkip={handleSkipOnboarding}
+        onNext={() => {
+          if (onboardingStep < 2) setOnboardingStep(onboardingStep + 1);
+          else setShowOnboarding(false);
+        }}
+        onSkip={() => setShowOnboarding(false)}
       />
     </View>
   );
 }
 
-// Dynamic styles function that uses theme
 const createStyles = (theme: any) => StyleSheet.create({
   mainContainer: {
     flex: 1,
     backgroundColor: theme.background,
   },
-  container: {
-    flex: 1,
-    backgroundColor: theme.background,
-  },
-  blurOverlay: {
+  heroBackground: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    zIndex: 1,
+    height: Platform.OS === 'ios' ? 240 : 260,
+    backgroundColor: brandColor,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
   },
-  blurredElement: {
-    opacity: 0.3,
-  },
-  highlightedElement: {
-    zIndex: 10,
-    elevation: 20,
-    shadowColor: brandColor,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 15,
-  },
-  header: { 
+  headerContainer: {
     paddingHorizontal: 20,
-    paddingTop: 40,
-    paddingBottom: 10,
-    backgroundColor: theme.background,
+    paddingTop: Platform.OS === 'ios' ? 50 : 60,
+    paddingBottom: 20,
   },
   topBar: {
-  position: 'absolute',  
-  top: 0,                
-  left: 0,               
-  right: 0,              
-  zIndex: 10,
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  paddingTop: 40,
-  paddingBottom: 15,
-  paddingHorizontal: 20,
-  borderBottomColor: theme.border,
-  backgroundColor: theme.background,
-},
-  rightSection: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 2,
-},
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -839,134 +567,108 @@ const createStyles = (theme: any) => StyleSheet.create({
     height: 32,
     marginRight: 8,
     borderRadius: 8,
+    backgroundColor: '#fff',
   },
   logoText: {
     fontSize: 22,
     fontWeight: '800',
-    color: theme.text,
+    color: '#fff',
   },
-  headerRight: {
+  rightSection: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
   notificationButton: {
     position: 'relative',
-    padding: 8,
-    
+    padding: 4,
   },
   notificationBadge: {
     position: 'absolute',
-    top: 6,
+    top: 4,
     right: 6,
-    width: 8,
-    height: 8,
+    width: 10,
+    height: 10,
     backgroundColor: '#FF4444',
-    borderRadius: 4,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: brandColor,
   },
   profileContainer: {
     borderRadius: 20,
     overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.5)'
   },
   profilePic: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  greetingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
   },
   greetingRow: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  marginBottom: 4,
-  marginTop: 70
-},
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   greeting: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
-    color: theme.text,
+    color: '#fff',
   },
   subGreeting: {
-    fontSize: 16,
-    color: theme.textSecondary,
-    marginBottom: 24,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 20,
+    marginTop: 4,
   },
   searchBar: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.surface,
+    backgroundColor: theme.card,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: theme.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   searchIconLeft: {
-    marginRight: 12,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: theme.text,
   },
-  filterButton: {
-    backgroundColor: theme.surface,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.border,
+  container: {
+    flex: 1,
   },
-  section: {
-    paddingHorizontal: 20,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 60,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: theme.textSecondary,
+    fontWeight: '500'
+  },
+  categorySection: {
+    marginTop: 20,
     marginBottom: 24,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: theme.text,
-    marginBottom: 12,
-  },
-  // NEW: Style for new products count
-  newProductsCount: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: brandColor,
-  },
-  seeAllText: {
-    color: brandColor,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  categoryScrollContainer: {
-    overflow: 'visible',
-  },
-  categoryContainer: {
-    overflow: 'hidden',
-  },
   categoryList: {
-    paddingRight: 20,
+    paddingHorizontal: 20,
   },
   categoryChip: {
     backgroundColor: theme.surface,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 20,
-    borderRadius: 25,
-    marginRight: 12,
+    borderRadius: 20,
+    marginRight: 10,
     borderWidth: 1,
     borderColor: theme.border,
   },
@@ -982,126 +684,143 @@ const createStyles = (theme: any) => StyleSheet.create({
   selectedCategoryText: {
     color: '#fff',
   },
+  section: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
   featuredBanner: {
-    backgroundColor: theme.surface,
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 20,
+    padding: 24,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: theme.border,
+    borderColor: 'rgba(75, 86, 233, 0.2)',
   },
   bannerContent: {
     flex: 1,
   },
   bannerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.text,
-    marginBottom: 4,
+    fontSize: 20,
+    fontWeight: '800',
+    color: brandColor,
+    marginBottom: 6,
   },
   bannerSubtitle: {
     fontSize: 14,
     color: theme.textSecondary,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   bannerButton: {
     backgroundColor: brandColor,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     alignSelf: 'flex-start',
   },
   bannerButtonText: {
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
+    fontWeight: '700',
+    fontSize: 14,
   },
   bannerImagePlaceholder: {
-    width: 60,
-    height: 60,
-    backgroundColor: theme.card,
-    borderRadius: 30,
+    width: 80,
+    height: 80,
+    backgroundColor: brandColor,
+    borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',
+    opacity: 0.9,
   },
-  productRow: {
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: theme.text,
+  },
+  newProductsCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: brandColor,
+  },
+  seeAllText: {
+    color: brandColor,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  productsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
+  gridItemWrapper: {
+    width: '48%',
+    marginBottom: 16,
+  },
   productCard: {
-    width: (width - 52) / 2,
+    width: '100%',
     backgroundColor: theme.card,
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: theme.shadow?.split('(')[0] || '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: theme.shadow?.includes('0.1') ? 0.1 : 0.3,
-    shadowRadius: 8,
-    elevation: 3,
     borderWidth: 1,
     borderColor: theme.border,
   },
   productImageContainer: {
     position: 'relative',
+    backgroundColor: theme.surface,
   },
   productImage: {
     width: '100%',
-    height: 120,
+    height: 140,
     resizeMode: 'cover',
   },
   imagePlaceholder: {
     width: '100%',
-    height: 120,
-    backgroundColor: theme.surface,
+    height: 140,
     justifyContent: 'center',
     alignItems: 'center',
   },
   discountBadge: {
     position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: '#FF4444',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    top: 10,
+    left: 10,
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 8,
-    shadowColor: '#FF4444',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 4,
   },
   discountText: {
     color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '800',
   },
   newProductBadge: {
     position: 'absolute',
-    top: 8,
-    right: 40,
+    top: 10,
+    right: 42,
     backgroundColor: brandColor,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 8,
-    shadowColor: brandColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 4,
   },
   newProductText: {
     color: '#fff',
-    fontSize: 9,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
   },
   favoriteButton: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 10,
+    right: 10,
     backgroundColor: 'rgba(0,0,0,0.3)',
     borderRadius: 15,
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1109,171 +828,82 @@ const createStyles = (theme: any) => StyleSheet.create({
     padding: 12,
   },
   productName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: theme.text,
     marginBottom: 6,
-    lineHeight: 18,
+    height: 40,
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   rating: {
     fontSize: 12,
     color: theme.textSecondary,
     marginLeft: 4,
-    marginRight: 2,
-    fontWeight: '500',
-  },
-  reviews: {
-    fontSize: 12,
-    color: theme.textTertiary,
+    fontWeight: '600',
   },
   priceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  originalPrice: {
-    fontSize: 12,
-    color: theme.textTertiary,
-    textDecorationLine: 'line-through',
-  },
   productPrice: {
-    fontSize: 16,
+    fontSize: 18,
     color: brandColor,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   addToCartButton: {
-    backgroundColor: theme.surface,
-    borderRadius: 8,
-    padding: 6,
-    borderWidth: 1,
-    borderColor: theme.border,
+    backgroundColor: brandColor,
+    borderRadius: 10,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
   },
   emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     color: theme.textSecondary,
-    marginTop: 12,
+    marginTop: 16,
   },
   emptySubtext: {
-    fontSize: 14,
+    fontSize: 15,
     color: theme.textTertiary,
-    marginTop: 4,
+    marginTop: 8,
   },
   fab: {
     position: 'absolute',
-    bottom: 30,
+    bottom: Platform.OS === 'ios' ? 30 : 20,
     right: 20,
-    width: 56,
-    height: 56,
+    width: 60,
+    height: 60,
     backgroundColor: brandColor,
-    borderRadius: 28,
+    borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: brandColor,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
   },
-  
-  // Enhanced Onboarding Styles
-  onboardingOverlay: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 100,
-  },
-  tooltipContainer: {
-    position: 'absolute',
-    backgroundColor: theme.card,
-    borderRadius: 16,
-    padding: 20,
-    width: 280,
-    shadowColor: theme.shadow?.split('(')[0] || '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
-    elevation: 15,
-    borderWidth: 1,
-    borderColor: theme.border,
-  },
-  tooltipTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.text,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  tooltipDescription: {
-    fontSize: 14,
-    color: theme.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 20,
-  },
-  tooltipButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16,
-  },
-  skipButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.border,
-    alignItems: 'center',
-    backgroundColor: theme.surface,
-  },
-  skipButtonText: {
-    color: theme.textSecondary,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  nextButton: {
-    flex: 1,
-    backgroundColor: brandColor,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  nextButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  stepIndicator: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  stepDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: theme.border,
-  },
-  activeStepDot: {
-    backgroundColor: brandColor,
-    width: 12,
-  },
+  onboardingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 },
+  tooltipContainer: { position: 'absolute', backgroundColor: theme.card, borderRadius: 16, padding: 20, width: 280, borderWidth: 1, borderColor: theme.border },
+  tooltipTitle: { fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 8, textAlign: 'center' },
+  tooltipDescription: { fontSize: 14, color: theme.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
+  tooltipButtons: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 16 },
+  skipButton: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center', backgroundColor: theme.surface },
+  skipButtonText: { color: theme.textSecondary, fontWeight: '600', fontSize: 14 },
+  nextButton: { flex: 1, backgroundColor: brandColor, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  nextButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  stepIndicator: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  stepDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.border },
+  activeStepDot: { backgroundColor: brandColor, width: 12 },
 });

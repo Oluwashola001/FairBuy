@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import {
   FlatList,
+  Image,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -14,11 +15,28 @@ import {
 import { useCart } from "./contexts/CartContext";
 import { useTheme } from "./contexts/ThemeContext";
 
+// Wrap require in try/catch to handle missing assets safely across bundlers
+let placeholderImg: any;
+try {
+  placeholderImg = require("../assets/images/placeholder.png");
+} catch (error) {
+  placeholderImg = { uri: "https://via.placeholder.com/150" };
+}
+
 export default function CheckoutScreen() {
   const router = useRouter();
   const { cart } = useCart();
   const { theme } = useTheme();
   const styles = createStyles(theme);
+
+  // Safe image source resolver (same as cart)
+  const getImageSource = (image: any) => {
+    if (!image) return placeholderImg;
+    if (typeof image === "string") return { uri: image };
+    if (typeof image === "number") return image;
+    if (typeof image === "object" && image?.uri) return image;
+    return placeholderImg; 
+  };
 
   // Count items
   const itemCount = cart.reduce((acc, it) => acc + (it.quantity || 1), 0);
@@ -38,6 +56,11 @@ export default function CheckoutScreen() {
     const qty = item.quantity || 1;
     return (
       <View style={styles.itemRow}>
+        <Image
+          source={getImageSource(item.image)}
+          style={styles.itemImage}
+          resizeMode="cover"
+        />
         <View style={styles.itemInfo}>
           <Text style={styles.itemName} numberOfLines={2}>
             {item.name}
@@ -47,7 +70,7 @@ export default function CheckoutScreen() {
         <View style={styles.itemPricing}>
           <Text style={styles.itemPrice}>${(item.price * qty).toFixed(2)}</Text>
           {qty > 1 && (
-            <Text style={styles.itemUnitPrice}>${item.price.toFixed(2)} each</Text>
+            <Text style={styles.itemUnitPrice}>${Number(item.price).toFixed(2)} each</Text>
           )}
         </View>
       </View>
@@ -77,7 +100,7 @@ export default function CheckoutScreen() {
         {/* Order Summary Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Ionicons name="bag-outline" size={20} color={theme?.primary ?? "#4B56E9"} />
+            <Ionicons name="bag-check-outline" size={20} color={theme?.primary ?? "#4B56E9"} />
             <Text style={styles.sectionTitle}>Order Summary</Text>
             <View style={styles.itemCountBadge}>
               <Text style={styles.itemCountText}>{itemCount}</Text>
@@ -188,6 +211,7 @@ const createStyles = (theme: any) =>
       backgroundColor: theme?.background ?? "#fff",
       borderBottomWidth: 1,
       borderBottomColor: theme?.border ?? "#e1e5e9",
+      marginTop: 42,
     },
     backBtn: {
       padding: 8,
@@ -207,16 +231,18 @@ const createStyles = (theme: any) =>
       flex: 1,
     },
     section: {
-      backgroundColor: theme?.background ?? "#fff",
+      backgroundColor: theme?.surface ?? "#fff",
       marginHorizontal: 16,
       marginTop: 16,
-      borderRadius: 16,
+      borderRadius: 20,
       padding: 20,
       shadowColor: "#000",
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 12,
       elevation: 3,
+      borderWidth: 1,
+      borderColor: theme?.border ?? "#e1e5e9",
     },
     sectionHeader: {
       flexDirection: "row",
@@ -225,7 +251,7 @@ const createStyles = (theme: any) =>
     },
     sectionTitle: {
       fontSize: 18,
-      fontWeight: "600",
+      fontWeight: "700",
       color: theme?.text ?? "#1a1d21",
       marginLeft: 8,
       flex: 1,
@@ -241,7 +267,7 @@ const createStyles = (theme: any) =>
     itemCountText: {
       color: "#fff",
       fontSize: 12,
-      fontWeight: "600",
+      fontWeight: "700",
     },
     itemsList: {
       // Container for items
@@ -251,34 +277,44 @@ const createStyles = (theme: any) =>
       paddingVertical: 16,
       borderBottomWidth: 1,
       borderBottomColor: theme?.border ?? "#f0f2f5",
-      alignItems: "flex-start",
+      alignItems: "center",
+    },
+    itemImage: {
+      width: 56,
+      height: 56,
+      borderRadius: 12,
+      backgroundColor: theme?.background ?? "#f8f9fa",
+      marginRight: 16,
     },
     itemInfo: {
       flex: 1,
       marginRight: 12,
     },
     itemName: {
-      fontSize: 16,
-      fontWeight: "500",
+      fontSize: 15,
+      fontWeight: "600",
       color: theme?.text ?? "#1a1d21",
       marginBottom: 4,
+      lineHeight: 20,
     },
     itemQuantity: {
       fontSize: 14,
       color: theme?.textSecondary ?? "#6b7280",
+      fontWeight: "500",
     },
     itemPricing: {
       alignItems: "flex-end",
+      justifyContent: "center",
     },
     itemPrice: {
       fontSize: 16,
-      fontWeight: "600",
+      fontWeight: "700",
       color: theme?.text ?? "#1a1d21",
     },
     itemUnitPrice: {
       fontSize: 12,
       color: theme?.textSecondary ?? "#6b7280",
-      marginTop: 2,
+      marginTop: 4,
     },
     priceBreakdown: {
       // Container for price rows
@@ -287,33 +323,31 @@ const createStyles = (theme: any) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      paddingVertical: 12,
-    },
-    priceRowLeft: {
-      flex: 1,
+      paddingVertical: 10,
     },
     priceLabel: {
       fontSize: 15,
       color: theme?.textSecondary ?? "#6b7280",
+      fontWeight: "500",
     },
     priceValue: {
       fontSize: 15,
-      fontWeight: "500",
+      fontWeight: "600",
       color: theme?.text ?? "#1a1d21",
     },
     priceDivider: {
       height: 1,
       backgroundColor: theme?.border ?? "#e1e5e9",
-      marginVertical: 8,
+      marginVertical: 12,
     },
     totalLabel: {
       fontSize: 18,
-      fontWeight: "700",
+      fontWeight: "800",
       color: theme?.text ?? "#1a1d21",
     },
     totalValue: {
       fontSize: 18,
-      fontWeight: "700",
+      fontWeight: "800",
       color: theme?.primary ?? "#4B56E9",
     },
     bottomSpacer: {
@@ -325,15 +359,15 @@ const createStyles = (theme: any) =>
       left: 0,
       right: 0,
       backgroundColor: theme?.background ?? "#fff",
-      paddingHorizontal: 20,
-      paddingTop: 16,
+      paddingHorizontal: 24,
+      paddingTop: 20,
       paddingBottom: 40,
       borderTopWidth: 1,
       borderTopColor: theme?.border ?? "#e1e5e9",
       shadowColor: "#000",
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
+      shadowOffset: { width: 0, height: -4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 12,
       elevation: 10,
     },
     totalSummary: {
@@ -343,25 +377,26 @@ const createStyles = (theme: any) =>
       marginBottom: 16,
     },
     bottomTotalLabel: {
-      fontSize: 16,
+      fontSize: 14,
+      fontWeight: "600",
       color: theme?.textSecondary ?? "#6b7280",
     },
     bottomTotalValue: {
-      fontSize: 20,
-      fontWeight: "700",
+      fontSize: 24,
+      fontWeight: "800",
       color: theme?.text ?? "#1a1d21",
     },
     checkoutBtn: {
       backgroundColor: theme?.primary ?? "#4B56E9",
-      paddingVertical: 16,
-      borderRadius: 12,
+      paddingVertical: 18,
+      borderRadius: 16,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       shadowColor: theme?.primary ?? "#4B56E9",
-      shadowOffset: { width: 0, height: 4 },
+      shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.3,
-      shadowRadius: 8,
+      shadowRadius: 12,
       elevation: 6,
     },
     checkoutBtnIcon: {
@@ -378,7 +413,7 @@ const createStyles = (theme: any) =>
     },
     emptyTitle: {
       fontSize: 20,
-      fontWeight: "600",
+      fontWeight: "700",
       color: theme?.text ?? "#1a1d21",
       marginTop: 16,
       marginBottom: 8,
@@ -391,12 +426,12 @@ const createStyles = (theme: any) =>
     continueShopping: {
       backgroundColor: theme?.primary ?? "#4B56E9",
       paddingHorizontal: 24,
-      paddingVertical: 12,
-      borderRadius: 8,
+      paddingVertical: 14,
+      borderRadius: 12,
     },
     continueShoppingText: {
       color: "#fff",
-      fontWeight: "600",
+      fontWeight: "700",
       fontSize: 15,
     },
   });

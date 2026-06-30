@@ -1,3 +1,5 @@
+// app/index.tsx (or app/welcome.tsx depending on your entry point name)
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
@@ -6,15 +8,17 @@ import {
   Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useTheme } from './contexts/ThemeContext';
+import { useTheme } from './contexts/ThemeContext'; // Ensure this points to your renamed context folder
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const brandColor = '#4B56E9';
 
 interface Slide {
   id: number;
@@ -28,7 +32,7 @@ const slides: Slide[] = [
     id: 1,
     image: require('@/assets/images/welcome-illustration1.png'),
     title: 'Your Shield In Every Deal.',
-    subtitle: 'Shop, Sell and Hire. All in one place',
+    subtitle: 'Shop, Sell and Hire. All in one secure marketplace.',
   },
   {
     id: 2,
@@ -40,7 +44,7 @@ const slides: Slide[] = [
     id: 3,
     image: require('@/assets/images/welcome-illustration3.png'),
     title: 'Track Your Orders',
-    subtitle: 'Real-time order updates from purchase to delivery.',
+    subtitle: 'Get real-time order updates from purchase to delivery.',
   },
 ];
 
@@ -49,7 +53,7 @@ export default function WelcomeScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
 
   const resetAutoScroll = () => {
     if (intervalRef.current) {
@@ -85,10 +89,17 @@ export default function WelcomeScreen() {
   };
 
   const renderSlide = (slide: Slide) => (
-    <View key={slide.id} style={[styles.slide, { width: screenWidth }]}>
-      <Image source={slide.image} style={styles.illustration} resizeMode="contain" />
-      <Text style={[styles.title, { color: theme.text }]}>{slide.title}</Text>
-      <Text style={[styles.subtitle, { color: theme.textSecondary }]}>{slide.subtitle}</Text>
+    <View key={slide.id} style={styles.slide}>
+      {/* Top Half: Illustration */}
+      <View style={styles.illustrationWrapper}>
+        <Image source={slide.image} style={styles.illustration} resizeMode="contain" />
+      </View>
+
+      {/* Bottom Half: Text Content */}
+      <View style={styles.textWrapper}>
+        <Text style={styles.title}>{slide.title}</Text>
+        <Text style={styles.subtitle}>{slide.subtitle}</Text>
+      </View>
     </View>
   );
 
@@ -110,18 +121,23 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style={theme.statusBar} />
-      <View style={styles.backgroundGradient} />
+      <StatusBar style="light" />
       
+      {/* Premium Split Background Design */}
+      <View style={styles.blueBackground} />
+      <View style={styles.whiteBottomCard} />
+      
+      {/* Header / Logo */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
           <View style={styles.logoWrapper}>
-            <Image source={require('@/assets/images/logo.png')} style={styles.logo} />
+            <Image source={require('@/assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
           </View>
           <Text style={styles.brandName}>FairTrade</Text>
         </View>
       </View>
 
+      {/* Slider */}
       <View style={styles.slidesWrapper}>
         <ScrollView
           ref={scrollViewRef}
@@ -131,16 +147,22 @@ export default function WelcomeScreen() {
           onMomentumScrollEnd={handleScroll}
           scrollEventThrottle={16}
           decelerationRate="fast"
+          bounces={false}
         >
           {slides.map(renderSlide)}
         </ScrollView>
       </View>
 
-      {renderPaginationDots()}
-
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.getStartedButton} onPress={() => router.push('/auth/login')}>
+      {/* Static Bottom Elements (Pagination & Button) */}
+      <View style={styles.bottomStaticContainer}>
+        {renderPaginationDots()}
+        <TouchableOpacity 
+          style={styles.getStartedButton} 
+          onPress={() => router.push('/auth/signup')}
+          activeOpacity={0.8}
+        >
           <Text style={styles.buttonText}>Get Started</Text>
+          <Ionicons name="arrow-forward" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
     </View>
@@ -152,134 +174,153 @@ const createStyles = (theme: any) => StyleSheet.create({
     flex: 1,
     backgroundColor: theme.background,
   },
-  backgroundGradient: {
+  // The blue hero top section
+  blueBackground: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: '50%',
-    backgroundColor: theme.surface,
-    opacity: 0.6,
+    height: screenHeight * 0.55,
+    backgroundColor: brandColor,
+  },
+  // The elevated white card bottom section
+  whiteBottomCard: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: screenHeight * 0.50,
+    backgroundColor: theme.card,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 20,
   },
   header: {
-    paddingTop: 50,
-    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 70,
+    paddingHorizontal: 24,
     alignItems: 'center',
-    marginBottom: 45,
+    zIndex: 10,
   },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
   },
   logoWrapper: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
-    shadowColor: '#4B56E9',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
   },
   logo: {
-    width: 40,
-    height: 40,
+    width: 30,
+    height: 30,
   },
   brandName: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '800',
-    color: theme.text,
-    letterSpacing: -0.6,
+    color: '#fff',
+    letterSpacing: -0.5,
   },
   slidesWrapper: {
     flex: 1,
+    zIndex: 5,
   },
   slide: {
-    alignItems: 'center',
+    width: screenWidth,
+    height: '100%',
+  },
+  illustrationWrapper: {
+    height: screenHeight * 0.55 - 120, // Leaves room for header
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 20,
   },
   illustration: {
-    width: screenWidth * 0.8,
-    height: 280,
-    marginBottom: 24,
+    width: screenWidth * 0.85,
+    height: '90%',
+  },
+  textWrapper: {
+    height: screenHeight * 0.45,
+    paddingTop: 40,
+    paddingHorizontal: 30,
+    alignItems: 'center',
   },
   title: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 34,
-    letterSpacing: -0.8,
+    color: theme.text,
+    marginBottom: 12,
+    lineHeight: 36,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 16,
     fontWeight: '500',
     textAlign: 'center',
+    color: theme.textSecondary,
     lineHeight: 24,
-    paddingHorizontal: 16,
-    marginBottom: 24,
+    paddingHorizontal: 10,
+  },
+  bottomStaticContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 40,
+    zIndex: 20,
   },
   paginationContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 32,
   },
   paginationDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     marginHorizontal: 4,
-    marginBottom: 8,
   },
   activeDot: {
-    backgroundColor: '#4B56E9',
+    backgroundColor: brandColor,
     width: 24,
     borderRadius: 12,
-    shadowColor: '#4B56E9',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
   },
   inactiveDot: {
-    // backgroundColor applied dynamically above
-  },
-  buttonContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 50,
+    // Background color applied dynamically
   },
   getStartedButton: {
-    backgroundColor: '#4B56E9',
+    flexDirection: 'row',
+    backgroundColor: brandColor,
     borderRadius: 16,
-    paddingVertical: 16,
+    paddingVertical: 18,
     alignItems: 'center',
-    shadowColor: '#4B56E9',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
+    justifyContent: 'center',
+    shadowColor: brandColor,
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
-    shadowRadius: 12,
+    shadowRadius: 16,
     elevation: 8,
-    position: 'relative',
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.2,
+    marginRight: 8,
   },
 });

@@ -1,24 +1,24 @@
 // app/(tabs)/profile.tsx
-import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   Dimensions,
   Image,
   Modal,
   Platform,
-  SafeAreaView,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context'; // Updated Import
+import { supabase } from '../../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
@@ -37,12 +37,34 @@ export default function ProfileScreen() {
   const [userName, setUserName] = useState('Loading...');
   const [userEmail, setUserEmail] = useState('Loading...');
 
+  // Track if user has completed seller onboarding
+  const [isUserASeller, setIsUserASeller] = useState(false);
+
   // Database Order States
   const [orders, setOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null); // For the details modal
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
   
+  // --- Global Custom Modal State (Replaces Alert.alert) ---
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({ visible: false, title: '', message: '' });
+
   const { theme, isDark } = useTheme();
+
+  const showAlert = (title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({
+      visible: true,
+      title,
+      message,
+      buttons: buttons || [{ text: 'OK', onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })), style: 'default' }]
+    });
+  };
+
+  const hideAlert = () => setAlertConfig(prev => ({ ...prev, visible: false }));
 
   // Run animations on mount
   useEffect(() => {
@@ -62,7 +84,6 @@ export default function ProfileScreen() {
     requestPermissions();
   }, []);
 
-  // Fetch data EVERY TIME the screen is viewed
   useFocusEffect(
     useCallback(() => {
       fetchUserData();
@@ -71,29 +92,52 @@ export default function ProfileScreen() {
   );
 
   const fetchUserData = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      setUserEmail(user.email || 'No Email');
-      
-      const generatedName = user.email?.split('@')[0].replace(/[^a-zA-Z]/g, ' ') || 'User';
-      const capitalizedName = generatedName.charAt(0).toUpperCase() + generatedName.slice(1);
-      setUserName(user.user_metadata?.full_name || capitalizedName);
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) return;
 
-      if (user.user_metadata?.avatar_url) {
-        setProfileImage(user.user_metadata.avatar_url);
+      const user = session.user;
+      setUserEmail(user.email || 'No Email');
+
+      // --- Profiles-First Architecture ---
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('username, full_name, avatar_url, is_seller') 
+        .eq('id', user.id)
+        .single();
+
+      if (profileData) {
+        // Set the seller flag to change the "Become Seller" button dynamically
+        if (profileData.is_seller) {
+          setIsUserASeller(true);
+        }
+
+        const displayUsername = profileData.username || profileData.full_name;
+        if (displayUsername) {
+          setUserName(displayUsername);
+        } else {
+          const generatedName = user.email?.split('@')[0].replace(/[^a-zA-Z]/g, ' ') || 'User';
+          setUserName(generatedName.charAt(0).toUpperCase() + generatedName.slice(1));
+        }
+
+        if (profileData.avatar_url) {
+          setProfileImage(profileData.avatar_url);
+        }
       }
+    } catch (error) {
+      console.error("Error fetching user identity:", error);
     }
   };
 
   const fetchMyOrders = async () => {
     setLoadingOrders(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
         const { data, error } = await supabase
           .from('orders')
           .select('*')
-          .eq('buyer_id', user.id)
+          .eq('buyer_id', session.user.id)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -110,8 +154,9 @@ export default function ProfileScreen() {
     try {
       setIsUploading(true);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("You must be logged in to upload an avatar.");
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error("You must be logged in to upload an avatar.");
+      const user = session.user;
 
       const response = await fetch(uri);
       const blob = await response.blob();
@@ -133,17 +178,19 @@ export default function ProfileScreen() {
         .from('avatars')
         .getPublicUrl(filePath);
 
-      const { error: updateError } = await supabase.auth.updateUser({
-        data: { avatar_url: publicUrl },
-      });
+      // --- Profiles-First Architecture: Update DB, not Auth Meta ---
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id);
 
       if (updateError) throw updateError;
 
       setProfileImage(publicUrl);
-      Alert.alert('Success', 'Profile picture updated successfully!');
+      showAlert('Success', 'Profile picture updated successfully!');
     } catch (error: any) {
       console.error('Upload error:', error);
-      Alert.alert('Error', error.message || 'Failed to upload image.');
+      showAlert('Error', error.message || 'Failed to upload image.');
     } finally {
       setIsUploading(false);
     }
@@ -168,33 +215,32 @@ export default function ProfileScreen() {
 
   const showImagePickerOptions = () => {
     if (!permissionsGranted && Platform.OS !== 'web') {
-      Alert.alert(
+      showAlert(
         'Permissions Required',
         'Please grant camera and photo library permissions to update your profile picture.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Grant Permissions', onPress: requestPermissions }
+          { text: 'Grant Permissions', style: 'default', onPress: requestPermissions }
         ]
       );
       return;
     }
 
-    Alert.alert(
+    showAlert(
       "Update Profile Picture",
       "Choose how you'd like to update your profile picture",
       [
-        { text: "Camera", onPress: openCamera, style: "default" },
-        { text: "Photo Library", onPress: openImageLibrary, style: "default" },
+        { text: "Camera", style: "default", onPress: openCamera },
+        { text: "Photo Library", style: "default", onPress: openImageLibrary },
         { text: "Cancel", style: "cancel" },
-      ],
-      { cancelable: true }
+      ]
     );
   };
 
   const openCamera = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
@@ -205,14 +251,14 @@ export default function ProfileScreen() {
         await uploadImageToSupabase(result.assets[0].uri);
       }
     } catch (error: any) {
-      Alert.alert('Error', `Failed to open camera: ${error.message}`);
+      showAlert('Error', `Failed to open camera: ${error.message}`);
     }
   };
 
   const openImageLibrary = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
@@ -223,12 +269,12 @@ export default function ProfileScreen() {
         await uploadImageToSupabase(result.assets[0].uri);
       }
     } catch (error: any) {
-      Alert.alert('Error', `Failed to open photo library: ${error.message}`);
+      showAlert('Error', `Failed to open photo library: ${error.message}`);
     }
   };
 
   const handleSignOut = async () => {
-    Alert.alert(
+    showAlert(
       "Sign Out",
       "Are you sure you want to log out?",
       [
@@ -245,9 +291,8 @@ export default function ProfileScreen() {
     );
   };
 
-  // E-commerce Action: Cancel Order
   const handleCancelOrder = async (orderId: string) => {
-    Alert.alert(
+    showAlert(
       "Cancel Order",
       "Are you sure you want to cancel this order? This cannot be undone.",
       [
@@ -264,14 +309,13 @@ export default function ProfileScreen() {
               
               if (error) throw error;
               
-              // Update local state for immediate UI feedback
               setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'Cancelled' } : o));
               setSelectedOrder((prev: any) => ({ ...prev, status: 'Cancelled' }));
               
-              Alert.alert("Success", "Your order has been cancelled.");
+              setTimeout(() => showAlert("Success", "Your order has been cancelled."), 500);
             } catch (err: any) {
               console.error(err);
-              Alert.alert("Error", "Could not cancel order.");
+              setTimeout(() => showAlert("Error", "Could not cancel order."), 500);
             }
           }
         }
@@ -279,9 +323,8 @@ export default function ProfileScreen() {
     );
   };
 
-  // NEW E-commerce Action: Delete Order (Only for Cancelled Orders)
   const handleDeleteOrder = async (orderId: string) => {
-    Alert.alert(
+    showAlert(
       "Delete Order",
       "Are you sure you want to permanently remove this order from your history?",
       [
@@ -298,14 +341,13 @@ export default function ProfileScreen() {
               
               if (error) throw error;
               
-              // Update local state to remove the order entirely
               setOrders(prev => prev.filter(o => o.id !== orderId));
               setSelectedOrder(null);
               
-              Alert.alert("Success", "Order history deleted.");
+              setTimeout(() => showAlert("Success", "Order history deleted."), 500);
             } catch (err: any) {
               console.error(err);
-              Alert.alert("Error", "Could not delete the order.");
+              setTimeout(() => showAlert("Error", "Could not delete the order."), 500);
             }
           }
         }
@@ -313,13 +355,11 @@ export default function ProfileScreen() {
     );
   };
 
-  // E-commerce Action: Contact Support
   const handleContactSupport = () => {
     setSelectedOrder(null);
     router.push('/help');
   };
 
-  // Helper for displaying beautiful dates
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Just now';
     const d = new Date(dateString);
@@ -385,7 +425,7 @@ export default function ProfileScreen() {
               </View>
             </View>
           </View>
-          <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+          <Ionicons name="chevron-forward" size={20} color={theme.textTertiary || '#999'} />
         </TouchableOpacity>
       </Animated.View>
     );
@@ -394,306 +434,429 @@ export default function ProfileScreen() {
   const styles = createStyles(theme);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+    <View style={styles.mainContainer}>
+      <StatusBar style="light" />
       
-      <ScrollView showsVerticalScrollIndicator={false} bounces={true}>
-        {/* Header */}
-        <Animated.View
-          style={[
-            styles.header,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="chevron-back" size={24} color={theme.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Profile</Text>
-          <TouchableOpacity style={styles.settingsButton} onPress={() => router.push('/settings')}>
-            <Ionicons name="settings-outline" size={24} color={theme.text} />
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* User Profile Section */}
-        <Animated.View
-          style={[
-            styles.userSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <TouchableOpacity 
-            style={styles.avatarContainer}
-            onPress={showImagePickerOptions}
-            activeOpacity={0.8}
-            disabled={isUploading}
-          >
-            <Image
-              source={{ uri: profileImage }}
-              style={styles.avatar}
-              onError={() => {
-                setProfileImage('https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face');
-              }}
-            />
-            <View style={styles.avatarGlow} />
+      {/* Global Custom UI Modal for Alerts & Confirmations */}
+      <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={hideAlert}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalAlertContainer}>
+            <Text style={styles.modalAlertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalAlertMessage}>{alertConfig.message}</Text>
             
-            {/* Camera Icon Overlay */}
-            <View style={styles.cameraOverlay}>
-              {isUploading ? (
-                <Animated.View style={styles.uploadingIndicator}>
-                  <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
-                </Animated.View>
-              ) : (
-                <Ionicons name="camera" size={16} color="#fff" />
-              )}
+            <View style={styles.modalAlertButtonGroup}>
+              {alertConfig.buttons?.map((btn, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => {
+                    hideAlert();
+                    if (btn.onPress) {
+                      // Slight delay to allow modal close animation before executing action
+                      setTimeout(btn.onPress, 100);
+                    }
+                  }}
+                  style={[
+                    styles.modalAlertBtn,
+                    btn.style === 'destructive' ? styles.modalAlertBtnDestructive : 
+                    btn.style === 'cancel' ? styles.modalAlertBtnCancel : styles.modalAlertBtnDefault
+                  ]}
+                >
+                  <Text style={[
+                    styles.modalAlertBtnText,
+                    btn.style === 'cancel' ? { color: theme.text } : { color: '#fff' }
+                  ]}>
+                    {btn.text}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
-          </TouchableOpacity>
-          
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>{userName}</Text>
-            <Text style={styles.userEmail}>{userEmail}</Text>
-            <TouchableOpacity style={styles.editProfileButton} onPress={showImagePickerOptions}>
-              <Text style={styles.editProfileText}>
-                {isUploading ? 'Uploading...' : 'Tap to edit photo'}
-              </Text>
-            </TouchableOpacity>
           </View>
-        </Animated.View>
-
-        {/* Dynamic My Orders Section */}
-        <Animated.View
-          style={[
-            styles.ordersSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>My Orders</Text>
-          
-          {loadingOrders ? (
-            <Text style={styles.loadingText}>Loading your orders...</Text>
-          ) : orders.length === 0 ? (
-            <View style={styles.emptyOrdersContainer}>
-              <View style={styles.emptyIcon}>
-                <Ionicons name="receipt-outline" size={48} color={theme.textTertiary} />
-              </View>
-              <Text style={styles.emptyTitle}>No Orders Yet</Text>
-              <Text style={styles.emptySubtitle}>Your orders will appear here</Text>
-            </View>
-          ) : (
-            orders.map((order, index) => (
-              <OrderItem
-                key={order.id}
-                order={order}
-                index={index}
-                onPress={() => setSelectedOrder(order)}
-              />
-            ))
-          )}
-        </Animated.View>
-
-        {/* Switch to Seller Mode Button */}
-        <Animated.View
-          style={[
-            styles.buttonSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <TouchableOpacity style={styles.sellerModeButton} onPress={() => router.push('/become-seller')}>
-            <Text style={styles.sellerModeText}>Switch to Seller Mode</Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Help & Support */}
-        <Animated.View
-          style={[
-            styles.helpSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <TouchableOpacity style={styles.helpButton} onPress={() => router.push('/help')}>
-            <View style={styles.helpContent}>
-              <View style={styles.helpIconContainer}>
-                <Ionicons name="logo-facebook" size={20} color={brandColor} />
-              </View>
-              <Text style={styles.helpText}>Help & Support</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Sign Out Button */}
-        <Animated.View
-          style={[
-            styles.signOutSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-            <Text style={styles.signOutText}>Sign Out</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </ScrollView>
-
-      {/* Full Screen Order Details Modal */}
-      <Modal visible={!!selectedOrder} animationType="slide">
-        <SafeAreaView style={styles.fullScreenModal}>
-          {selectedOrder && (
-            <>
-              <View style={styles.fullScreenModalHeader}>
-                <TouchableOpacity onPress={() => setSelectedOrder(null)} style={styles.modalCloseButton}>
-                  <Ionicons name="close" size={24} color={theme.text} />
-                </TouchableOpacity>
-                <Text style={styles.fullScreenModalTitle}>Order Details</Text>
-                <View style={{ width: 40 }} />
-              </View>
-
-              <ScrollView style={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
-                <View style={styles.modalImageContainer}>
-                  <Image source={{ uri: selectedOrder.product_image || "https://via.placeholder.com/150" }} style={styles.modalImage} />
-                </View>
-
-                <Text style={styles.modalProductName}>{selectedOrder.product_name}</Text>
-                
-                <View style={styles.modalDetailRow}>
-                  <Text style={styles.modalLabel}>Order ID:</Text>
-                  <Text style={styles.modalValue}>#{String(selectedOrder.id).substring(0,8)}</Text>
-                </View>
-
-                <View style={styles.modalDetailRow}>
-                  <Text style={styles.modalLabel}>Status:</Text>
-                  <Text style={[styles.modalValue, { color: getStatusColor(selectedOrder.status) }]}>{selectedOrder.status}</Text>
-                </View>
-
-                <View style={styles.modalDetailRow}>
-                  <Text style={styles.modalLabel}>Date:</Text>
-                  <Text style={styles.modalValue}>{formatDate(selectedOrder.created_at)}</Text>
-                </View>
-
-                <View style={styles.modalDetailRow}>
-                  <Text style={styles.modalLabel}>Total Price:</Text>
-                  <Text style={styles.modalValuePrice}>${selectedOrder.total_price}</Text>
-                </View>
-
-                <View style={styles.modalActionButtons}>
-                  <TouchableOpacity style={styles.modalSupportBtn} onPress={handleContactSupport}>
-                    <Ionicons name="headset-outline" size={18} color={theme.textSecondary} />
-                    <Text style={styles.modalSupportBtnText}>Contact Support</Text>
-                  </TouchableOpacity>
-
-                  {/* Only allow cancellation if order is Pending */}
-                  {selectedOrder.status === 'Pending' && (
-                    <TouchableOpacity 
-                      style={styles.modalCancelBtn} 
-                      onPress={() => handleCancelOrder(selectedOrder.id)}
-                    >
-                      <Ionicons name="close-circle-outline" size={18} color="#EF4444" />
-                      <Text style={styles.modalCancelBtnText}>Cancel Order</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {/* Only show Delete button if the order has already been Cancelled */}
-                  {selectedOrder.status === 'Cancelled' && (
-                    <TouchableOpacity 
-                      style={styles.modalDeleteBtn} 
-                      onPress={() => handleDeleteOrder(selectedOrder.id)}
-                    >
-                      <Ionicons name="trash-outline" size={18} color="#fff" />
-                      <Text style={styles.modalDeleteBtnText}>Delete Record</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <View style={{ height: 40 }} />
-              </ScrollView>
-            </>
-          )}
-        </SafeAreaView>
+        </View>
       </Modal>
 
+      <View style={styles.heroBackground} />
+
+      <SafeAreaView style={styles.safeArea}>
+        <Animated.View
+          style={[
+            styles.headerContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          <View style={styles.placeholderIcon} />
+          <Text style={styles.headerTitle}>My Profile</Text>
+          <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/settings')}>
+            <Ionicons name="settings-outline" size={22} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+
+        <ScrollView 
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <Animated.View
+            style={[
+              styles.profileCard,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }],
+              },
+            ]}
+          >
+            <TouchableOpacity 
+              style={styles.avatarWrapper}
+              onPress={showImagePickerOptions}
+              activeOpacity={0.8}
+              disabled={isUploading}
+            >
+              <Image
+                source={{ uri: profileImage }}
+                style={styles.avatar}
+                onError={() => {
+                  setProfileImage('https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face');
+                }}
+              />
+              
+              <View style={styles.cameraOverlay}>
+                {isUploading ? (
+                  <Animated.View style={styles.uploadingIndicator}>
+                    <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+                  </Animated.View>
+                ) : (
+                  <Ionicons name="camera" size={14} color="#fff" />
+                )}
+              </View>
+            </TouchableOpacity>
+            
+            <Text style={styles.userName}>{userName}</Text>
+            <Text style={styles.userEmail}>{userEmail}</Text>
+
+            <View style={styles.badgesRow}>
+              <View style={[styles.badge, { backgroundColor: 'rgba(75, 86, 233, 0.1)' }]}>
+                <Ionicons name="person" size={12} color={brandColor} style={{ marginRight: 4 }} />
+                <Text style={[styles.badgeText, { color: brandColor }]}>Verified Buyer</Text>
+              </View>
+            </View>
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.ordersSection,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }],
+              },
+            ]}
+          >
+            <Text style={styles.sectionLabel}>My Recent Orders</Text>
+            
+            {loadingOrders ? (
+              <Text style={styles.loadingText}>Loading your orders...</Text>
+            ) : orders.length === 0 ? (
+              <View style={styles.emptyOrdersContainer}>
+                <View style={styles.emptyIcon}>
+                  <Ionicons name="receipt-outline" size={48} color={theme.textTertiary || '#999'} />
+                </View>
+                <Text style={styles.emptyTitle}>No Orders Yet</Text>
+                <Text style={styles.emptySubtitle}>Your purchases will appear here.</Text>
+              </View>
+            ) : (
+              orders.map((order, index) => (
+                <OrderItem
+                  key={order.id}
+                  order={order}
+                  index={index}
+                  onPress={() => setSelectedOrder(order)}
+                />
+              ))
+            )}
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }],
+              },
+            ]}
+          >
+            <Text style={styles.sectionLabel}>Account & Preferences</Text>
+            <View style={styles.menuGroup}>
+              {/* Dynamic Seller Button based on Profile Architecture */}
+              <TouchableOpacity 
+                style={styles.menuItem} 
+                onPress={() => isUserASeller ? router.push('/(seller)/dashboard') : router.push('/become-seller')}
+              >
+                <View style={[styles.menuIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                  <Ionicons name="storefront" size={20} color="#10B981" />
+                </View>
+                <Text style={styles.menuItemText}>{isUserASeller ? "Go to Seller Dashboard" : "Become a Seller"}</Text>
+                <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+              </TouchableOpacity>
+
+              <View style={styles.menuDivider} />
+
+              <TouchableOpacity 
+                style={styles.menuItem} 
+                onPress={() => router.push('/settings')}
+              >
+                <View style={[styles.menuIconBox, { backgroundColor: 'rgba(107, 114, 128, 0.1)' }]}>
+                  <Ionicons name="settings" size={20} color="#6B7280" />
+                </View>
+                <Text style={styles.menuItemText}>Settings</Text>
+                <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+              </TouchableOpacity>
+
+              <View style={styles.menuDivider} />
+
+              <TouchableOpacity 
+                style={styles.menuItem} 
+                onPress={() => router.push('/help')}
+              >
+                <View style={[styles.menuIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
+                  <Ionicons name="help-buoy" size={20} color="#F59E0B" />
+                </View>
+                <Text style={styles.menuItemText}>Help & Support</Text>
+                <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.logoutButton} 
+              onPress={handleSignOut}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#EF4444" style={{ marginRight: 8 }} />
+              <Text style={styles.logoutText}>Sign Out</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 100 }} />
+          </Animated.View>
+        </ScrollView>
+
+        <Modal visible={!!selectedOrder} animationType="slide" presentationStyle="pageSheet">
+          <SafeAreaView style={styles.fullScreenModal}>
+            {selectedOrder && (
+              <>
+                <View style={styles.fullScreenModalHeader}>
+                  <TouchableOpacity onPress={() => setSelectedOrder(null)} style={styles.modalCloseButton}>
+                    <Ionicons name="close" size={24} color={theme.text} />
+                  </TouchableOpacity>
+                  <Text style={styles.fullScreenModalTitle}>Order Details</Text>
+                  <View style={{ width: 40 }} />
+                </View>
+
+                <ScrollView style={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
+                  <View style={styles.modalImageContainer}>
+                    <Image source={{ uri: selectedOrder.product_image || "https://via.placeholder.com/150" }} style={styles.modalImage} />
+                  </View>
+
+                  <Text style={styles.modalProductName}>{selectedOrder.product_name}</Text>
+                  
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Order ID:</Text>
+                    <Text style={styles.modalValue}>#{String(selectedOrder.id).substring(0,8)}</Text>
+                  </View>
+
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Status:</Text>
+                    <Text style={[styles.modalValue, { color: getStatusColor(selectedOrder.status) }]}>{selectedOrder.status}</Text>
+                  </View>
+
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Date:</Text>
+                    <Text style={styles.modalValue}>{formatDate(selectedOrder.created_at)}</Text>
+                  </View>
+
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalLabel}>Total Price:</Text>
+                    <Text style={styles.modalValuePrice}>${selectedOrder.total_price}</Text>
+                  </View>
+
+                  <View style={styles.modalActionButtons}>
+                    <TouchableOpacity style={styles.modalSupportBtn} onPress={handleContactSupport}>
+                      <Ionicons name="headset-outline" size={18} color={theme.textSecondary} />
+                      <Text style={styles.modalSupportBtnText}>Contact Support</Text>
+                    </TouchableOpacity>
+
+                    {selectedOrder.status === 'Pending' && (
+                      <TouchableOpacity 
+                        style={styles.modalCancelBtn} 
+                        onPress={() => handleCancelOrder(selectedOrder.id)}
+                      >
+                        <Ionicons name="close-circle-outline" size={18} color="#EF4444" />
+                        <Text style={styles.modalCancelBtnText}>Cancel Order</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {selectedOrder.status === 'Cancelled' && (
+                      <TouchableOpacity 
+                        style={styles.modalDeleteBtn} 
+                        onPress={() => handleDeleteOrder(selectedOrder.id)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#fff" />
+                        <Text style={styles.modalDeleteBtnText}>Delete Record</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={{ height: 60 }} />
+                </ScrollView>
+              </>
+            )}
+          </SafeAreaView>
+        </Modal>
+      </SafeAreaView>
     </View>
   );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
-  container: {
+  mainContainer: {
     flex: 1,
     backgroundColor: theme.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  heroBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 280,
+    backgroundColor: brandColor,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  headerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingTop: 40,
+    paddingTop: Platform.OS === 'ios' ? 10 : 55,
     paddingBottom: 20,
   },
-  backButton: {
+  placeholderIcon: {
     width: 40,
     height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: theme.text,
+    fontWeight: "700",
+    color: "#fff",
   },
-  settingsButton: {
-    width: 40,
-    height: 40,
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 45,
+  },
+  
+  // Custom Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 20,
+    paddingHorizontal: 16,
   },
-  userSection: {
-    flexDirection: 'row',
+  modalAlertContainer: {
+    backgroundColor: theme.card,
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    maxWidth: 320,
+    borderWidth: 1,
+    borderColor: theme.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 20,
+  },
+  modalAlertTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: theme.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalAlertMessage: {
+    fontSize: 15,
+    color: theme.textSecondary,
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  modalAlertButtonGroup: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  modalAlertBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 40,
+    justifyContent: 'center',
   },
-  avatarContainer: {
+  modalAlertBtnDefault: {
+    backgroundColor: brandColor,
+  },
+  modalAlertBtnDestructive: {
+    backgroundColor: '#EF4444',
+  },
+  modalAlertBtnCancel: {
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  modalAlertBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  profileCard: {
+    backgroundColor: theme.card,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    marginBottom: 32,
+    shadowColor: theme.shadow?.split('(')[0] || '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  avatarWrapper: {
     position: 'relative',
+    marginTop: -60,
+    marginBottom: 16,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: theme.surface,
-  },
-  avatarGlow: {
-    position: 'absolute',
-    top: -4,
-    left: -4,
-    right: -4,
-    bottom: -4,
-    borderRadius: 44,
-    backgroundColor: brandColor,
-    opacity: 0.1,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 4,
+    borderColor: theme.card,
   },
   cameraOverlay: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
+    bottom: 4,
+    right: 4,
     width: 28,
     height: 28,
     backgroundColor: brandColor,
@@ -701,63 +864,67 @@ const createStyles = (theme: any) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: theme.background,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    borderColor: theme.card,
     elevation: 4,
   },
   uploadingIndicator: {
     transform: [{ rotate: '45deg' }],
   },
-  userInfo: {
-    marginLeft: 16,
-    flex: 1,
-  },
   userName: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: "800",
     color: theme.text,
-    marginBottom: 4,
+    marginBottom: 6,
+    textAlign: "center",
   },
   userEmail: {
     fontSize: 14,
     color: theme.textSecondary,
-    marginBottom: 6,
+    marginBottom: 16,
+    textAlign: "center",
   },
-  editProfileButton: {
-    paddingVertical: 2,
+  badgesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
   },
-  editProfileText: {
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  badgeText: {
     fontSize: 12,
-    color: brandColor,
-    fontWeight: '500',
+    fontWeight: "700",
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 12,
+    marginLeft: 4,
   },
   ordersSection: {
-    paddingHorizontal: 20,
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.text,
-    marginBottom: 20,
+    marginBottom: 24,
   },
   loadingText: {
     color: theme.textSecondary,
     marginBottom: 20,
-    fontStyle: 'italic'
+    fontStyle: 'italic',
+    paddingLeft: 4,
   },
   emptyOrdersContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 30,
     backgroundColor: theme.surface,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: theme.border,
-    marginBottom: 20,
   },
   emptyIcon: {
     width: 80,
@@ -779,11 +946,17 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.textSecondary,
   },
   orderItem: {
-    marginBottom: 16,
-    backgroundColor: theme.background,
-    borderRadius: 12,
-    padding: 10,
-    ...theme.shadow,
+    marginBottom: 12,
+    backgroundColor: theme.card,
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: theme.shadow?.split('(')[0] || '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   orderTouchable: {
     flexDirection: 'row',
@@ -806,7 +979,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     marginBottom: 4,
   },
   orderDate: {
-    fontSize: 14,
+    fontSize: 13,
     color: theme.textSecondary,
     marginBottom: 6,
   },
@@ -817,88 +990,69 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   orderPrice: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: brandColor,
   },
   statusBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   statusText: {
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase'
   },
-  buttonSection: {
+  menuGroup: {
+    backgroundColor: theme.card,
+    borderRadius: 20,
+    overflow: 'hidden',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
-  sellerModeButton: {
-    backgroundColor: brandColor,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginHorizontal: 0,
-    shadowColor: brandColor,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    backgroundColor: theme.card,
   },
-  sellerModeText: {
-    color: '#FFFFFF',
+  menuIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 16,
+  },
+  menuItemText: {
     fontSize: 16,
-    fontWeight: '800',
-  },
-  helpSection: {
-    marginBottom: 24,
-  },
-  helpButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.border,
-    borderTopWidth: 1,
-    borderTopColor: theme.border,
-  },
-  helpContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  helpIconContainer: {
-    width: 32,
-    height: 32,
-    backgroundColor: '#EEF2FF',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  helpText: {
-    fontSize: 16,
+    fontWeight: "600",
     color: theme.text,
-    fontWeight: '500',
+    flex: 1,
   },
-  signOutSection: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
+  menuDivider: {
+    height: 1,
+    backgroundColor: theme.border,
+    marginLeft: 68,
   },
-  signOutButton: {
-    alignItems: 'center',
+  logoutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 16,
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)",
+    marginTop: 8,
   },
-  signOutText: {
+  logoutText: {
     fontSize: 16,
-    color: '#EF4444',
-    fontWeight: '800',
+    fontWeight: "700",
+    color: "#EF4444",
   },
   
-  // Full Screen Modal Styles
   fullScreenModal: {
     flex: 1,
     backgroundColor: theme.background,
@@ -908,7 +1062,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 10 : 20, // Add padding for non-SafeArea devices
+    paddingTop: Platform.OS === 'ios' ? 10 : 20, 
     paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: theme.border,

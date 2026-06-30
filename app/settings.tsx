@@ -122,8 +122,8 @@ export default function SettingsScreen() {
               </View>
             </View>
             <Text style={styles.previewSubtitle}>
-              This is how your app will look in {isDark ? 'dark' : 'light'} mode. 
-              All screens will automatically adapt to your selected theme.
+              Theme {isDark ? 'dark' : 'light'} mode. 
+              Testing
             </Text>
             <TouchableOpacity style={styles.previewButton} activeOpacity={0.8}>
               <Text style={styles.previewButtonText}>Sample Button</Text>

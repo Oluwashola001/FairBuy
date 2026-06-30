@@ -1,88 +1,52 @@
 // app/auth/reset-password.tsx
-import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
 
 const brandColor = '#4B56E9';
-const inputWidth = 320;
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const { theme, isDark } = useTheme();
 
-  // State to manage the 2-step flow
   const [step, setStep] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(false);
-
-  // Form fields
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
 
-  // Step 1: Request the 8-digit reset code
   const handleRequestCode = async () => {
-    if (!email) {
-      Alert.alert('Error', 'Please enter your email address.');
-      return;
-    }
-
+    if (!email) return Alert.alert('Error', 'Please enter your email.');
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email);
     setLoading(false);
 
-    if (error) {
-      Alert.alert('Error', error.message);
-    } else {
-      Alert.alert('Check your email', 'We sent an 8-digit reset code to your email.');
-      setStep(2); // Move to Step 2
-    }
+    if (error) Alert.alert('Error', error.message);
+    else setStep(2);
   };
 
-  // Step 2: Verify code and update password
   const handleResetPassword = async () => {
-    if (!code || code.length !== 8) {
-      Alert.alert('Invalid Code', 'Please enter the full 8-digit code.');
-      return;
-    }
-    if (!newPassword || newPassword.length < 6) {
-      Alert.alert('Weak Password', 'Your new password must be at least 6 characters.');
-      return;
-    }
+    if (!code || code.length !== 8) return Alert.alert('Error', 'Invalid Code.');
+    if (!newPassword || newPassword.length < 6) return Alert.alert('Error', 'Password must be 6+ chars.');
 
     setLoading(true);
-    
-    // First, verify the OTP which temporarily logs the user in
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: 'recovery',
-    });
-
+    const { error: verifyError } = await supabase.auth.verifyOtp({ email, token: code, type: 'recovery' });
     if (verifyError) {
       setLoading(false);
-      Alert.alert('Verification Failed', verifyError.message);
-      return;
+      return Alert.alert('Error', verifyError.message);
     }
 
-    // Second, now that they are verified, update their password to the new one
-    const { error: updateError } = await supabase.auth.updateUser({
-      password: newPassword,
-    });
-
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
     setLoading(false);
 
-    if (updateError) {
-      Alert.alert('Update Failed', updateError.message);
-    } else {
-      Alert.alert('Success!', 'Your password has been reset successfully. Please log in.');
-      
-      // Sign the user out of the temporary recovery session
+    if (updateError) Alert.alert('Error', updateError.message);
+    else {
+      Alert.alert('Success', 'Password reset! Please log in.');
       await supabase.auth.signOut();
-      
-      // Route them back to the login screen
       router.replace('/auth/login'); 
     }
   };
@@ -90,166 +54,68 @@ export default function ResetPasswordScreen() {
   const styles = createStyles(theme);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <StatusBar style="light" />
+      <View style={styles.heroBackground} />
 
-      {step === 1 ? (
-        // --- STEP 1 UI: GET EMAIL ---
-        <>
-          <Text style={styles.heading}>Reset Password</Text>
-          <Text style={styles.subheading}>
-            Enter your email address and we'll send you an 8-digit code to reset your password.
-          </Text>
+      <View style={styles.headerSpacer}>
+        <TouchableOpacity onPress={() => router.push('/auth/login')} style={styles.backButton}>
+           <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Email address"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholderTextColor={theme.textTertiary}
-          />
+      <View style={styles.brandingContainer}>
+        <View style={styles.iconWrapper}>
+           <Ionicons name={step === 1 ? "key-outline" : "lock-open-outline"} size={40} color={brandColor} />
+        </View>
+        <Text style={styles.brandName}>{step === 1 ? 'Reset Password' : 'New Password'}</Text>
+      </View>
 
-          <TouchableOpacity 
-            style={styles.button} 
-            onPress={handleRequestCode}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? 'Sending...' : 'Send Reset Code'}
-            </Text>
-          </TouchableOpacity>
-        </>
-      ) : (
-        // --- STEP 2 UI: ENTER CODE & NEW PASSWORD ---
-        <>
-          <Text style={styles.heading}>Create New Password</Text>
-          <Text style={styles.subheading}>
-            Enter the 8-digit code sent to <Text style={styles.highlightEmail}>{email}</Text> and your new password.
-          </Text>
-
-          <TextInput
-            style={styles.codeInput}
-            placeholder="8-digit code"
-            value={code}
-            onChangeText={setCode}
-            keyboardType="number-pad"
-            maxLength={8}
-            placeholderTextColor={theme.textTertiary}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="New Password"
-            value={newPassword}
-            onChangeText={setNewPassword}
-            secureTextEntry
-            placeholderTextColor={theme.textTertiary}
-          />
-
-          <TouchableOpacity 
-            style={styles.button} 
-            onPress={handleResetPassword}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? 'Resetting...' : 'Reset Password'}
-            </Text>
-          </TouchableOpacity>
-        </>
-      )}
-
-      {/* Back to Login Button */}
-      <TouchableOpacity onPress={() => router.push('/auth/login')} style={styles.loginFallback}>
-        <Text style={styles.loginText}>Back to Login</Text>
-      </TouchableOpacity>
-    </View>
+      <View style={styles.authCard}>
+        {step === 1 ? (
+          <>
+            <Text style={styles.cardSubtitle}>Enter your email to receive an 8-digit reset code.</Text>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="mail-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+              <TextInput style={styles.input} placeholder="Email address" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholderTextColor={theme.textTertiary} />
+            </View>
+            <TouchableOpacity style={styles.primaryButton} onPress={handleRequestCode} disabled={loading}>
+              <Text style={styles.primaryButtonText}>{loading ? 'Sending...' : 'Send Code'}</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.cardSubtitle}>Enter the code sent to <Text style={{color: brandColor}}>{email}</Text></Text>
+            <TextInput style={styles.codeInput} placeholder="8-digit code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={8} placeholderTextColor={theme.textTertiary} />
+            <View style={styles.inputWrapper}>
+              <Ionicons name="lock-closed-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+              <TextInput style={styles.input} placeholder="New Password" value={newPassword} onChangeText={setNewPassword} secureTextEntry placeholderTextColor={theme.textTertiary} />
+            </View>
+            <TouchableOpacity style={styles.primaryButton} onPress={handleResetPassword} disabled={loading}>
+              <Text style={styles.primaryButtonText}>{loading ? 'Updating...' : 'Update Password'}</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: theme.background,
-  },
-  heading: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: theme.text,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  subheading: {
-    fontSize: 16,
-    color: theme.textSecondary,
-    textAlign: 'center',
-    marginBottom: 32,
-    paddingHorizontal: 10,
-    lineHeight: 24,
-  },
-  highlightEmail: {
-    color: brandColor,
-    fontWeight: '700',
-  },
-  input: {
-    width: inputWidth,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 20,
-    fontSize: 16,
-    color: theme.text,
-  },
-  codeInput: {
-    width: inputWidth,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 20,
-    fontSize: 20,
-    fontWeight: '600',
-    color: theme.text,
-    textAlign: 'center',
-    letterSpacing: 4,
-  },
-  button: {
-    backgroundColor: brandColor,
-    paddingVertical: 18,
-    borderRadius: 12,
-    width: inputWidth,
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: brandColor,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-    letterSpacing: 0.2,
-  },
-  loginFallback: {
-    marginTop: 10,
-    paddingVertical: 10,
-  },
-  loginText: {
-    fontSize: 15,
-    color: theme.textSecondary,
-    textAlign: 'center',
-    textDecorationLine: 'underline',
-  }
+  container: { flex: 1, backgroundColor: theme.background, alignItems: 'center', paddingHorizontal: 20 },
+  heroBackground: { position: 'absolute', top: 0, left: 0, right: 0, height: 350, backgroundColor: brandColor, borderBottomLeftRadius: 40, borderBottomRightRadius: 40 },
+   // Back arrow stays perfectly anchored here
+  headerSpacer: { height: Platform.OS === 'ios' ? 70 : 90, width: '100%', alignItems: 'flex-start', justifyContent: 'flex-end' },
+  backButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)' },
+  brandingContainer: { alignItems: 'center', marginBottom: 30, marginTop: 10 },
+  iconWrapper: { width: 80, height: 80, backgroundColor: '#fff', borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },
+  brandName: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  authCard: { width: '100%', backgroundColor: theme.card, borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: theme.shadow?.split('(')[0] || '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, borderWidth: 1, borderColor: theme.border },
+  cardSubtitle: { fontSize: 15, color: theme.textSecondary, textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  inputWrapper: { width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 16, paddingHorizontal: 16, marginBottom: 24, height: 56 },
+  inputIcon: { marginRight: 12 },
+  input: { flex: 1, fontSize: 16, color: theme.text },
+  codeInput: { width: '100%', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 16, padding: 16, marginBottom: 16, fontSize: 22, fontWeight: '700', color: theme.text, textAlign: 'center', letterSpacing: 8 },
+  primaryButton: { width: '100%', flexDirection: 'row', backgroundColor: brandColor, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: brandColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  primaryButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });

@@ -1,303 +1,245 @@
 // app/auth/signup.tsx
-import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
+import { makeRedirectUri } from 'expo-auth-session';
 import CheckBox from 'expo-checkbox';
-import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Alert, Dimensions, Image,
-  ScrollView,
-  StyleSheet,
-  Text, TextInput, TouchableOpacity,
-  View
+  Alert, Image, KeyboardAvoidingView, Platform, ScrollView,
+  StyleSheet, Text, TextInput, TouchableOpacity, View
 } from 'react-native';
+import { supabase } from '../../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
 
 const brandColor = '#4B56E9';
-const inputWidth = 320;
-const { height: screenHeight } = Dimensions.get('window');
 
-// CRITICAL: Required by Expo to properly close the browser after logging in
 WebBrowser.maybeCompleteAuthSession();
 
 export default function SignupScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  
-  // Added isDark to easily check the theme status for Expo's StatusBar
   const { theme, isDark } = useTheme();
 
-  const handleSignup = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter both email and password.');
-      return;
-    }
-    
-    setLoading(true);
-    
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-    setLoading(false);
+  // NEW: Helper function to check if profile exists before routing
+  const checkProfileAndRoute = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', userId)
+        .single();
 
-    if (error) {
-      Alert.alert('Signup Failed', error.message);
-    } else {
-      // Send them straight to the verification screen to type in the code
-      router.push({
-        pathname: '/auth/verify',
-        params: { email },
-      });
+      if (data?.username) {
+        router.replace('/(tabs)/home');
+      } else {
+        router.replace('/auth/onboarding');
+      }
+    } catch (err) {
+      router.replace('/auth/onboarding');
     }
   };
 
-  const handleGoogle = async () => {
-    // Generate the deep link to route back to your app
-    const redirectUrl = Linking.createURL('/auth/callback');
-    
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectUrl,
-        skipBrowserRedirect: true, // CRITICAL: Stops it from crashing in React Native
-      }
+  // Bounce logged-in users out to home or onboarding
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) checkProfileAndRoute(session.user.id);
     });
-    
-    if (error) {
-      Alert.alert('Google Login Failed', error.message);
+  }, []);
+
+  const handleSignup = async () => {
+    if (!email || !password || !fullName) {
+      Alert.alert('Missing Fields', 'Please fill in all fields.');
       return;
     }
+    
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: fullName } // Save their name to DB!
+        }
+      });
 
-    if (data?.url) {
-      // Manually pop open the secure browser
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      if (error) throw error;
       
-      // Catch the successful login redirect!
-      if (result.type === 'success' && result.url) {
-        // Extract the secure tokens from the URL hash
-        const hashPart = result.url.split('#')[1];
-        if (hashPart) {
-          const params = hashPart.split('&').reduce((acc, current) => {
-            const [key, value] = current.split('=');
-            acc[key] = value;
-            return acc;
-          }, {} as Record<string, string>);
+      // Send straight to OTP verification
+      router.push({ pathname: '/auth/verify', params: { email } });
+      
+    } catch (error: any) {
+      Alert.alert('Signup Failed', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-          // If we got the tokens, log the user into the Supabase session
-          if (params.access_token && params.refresh_token) {
-            await supabase.auth.setSession({
-              access_token: params.access_token,
-              refresh_token: params.refresh_token,
+  const handleGoogleSignup = async () => {
+    try {
+      setLoading(true);
+      const redirectUrl = makeRedirectUri();
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: redirectUrl, skipBrowserRedirect: true }
+      });
+      
+      if (error) throw error;
+
+      if (data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+        if (result.type === 'success' && result.url) {
+          const urlParams = new URLSearchParams(result.url.split('#')[1]);
+          if (urlParams.get('access_token') && urlParams.get('refresh_token')) {
+            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+              access_token: urlParams.get('access_token')!,
+              refresh_token: urlParams.get('refresh_token')!,
             });
             
-            // Success! Send them to the marketplace!
-            router.replace('/(tabs)/home');
+            if (sessionError) throw sessionError;
+            
+            if (sessionData.session?.user) {
+              await checkProfileAndRoute(sessionData.session.user.id);
+            }
           }
         }
       }
+    } catch (error: any) {
+      Alert.alert('Google Auth Failed', error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   const styles = createStyles(theme);
 
   return (
-    <ScrollView 
-      contentContainerStyle={styles.scrollContainer}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      bounces={true}
-    >
-      {/* Fixed TypeScript error by mapping to Expo's expected string values */}
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-      
-      <View style={styles.topSpacer} />
-      
-      <View style={styles.contentContainer}>
-        <Text style={styles.title}>Create an Account</Text>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <StatusBar style="light" />
+      <View style={styles.heroBackground} />
 
-        <View style={styles.inputContainer}>
-          <TextInput
-            placeholder="Email"
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            placeholderTextColor={theme.textTertiary}
-          />
-
-          <TextInput
-            placeholder="Password"
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            placeholderTextColor={theme.textTertiary}
-          />
-
-          <TextInput
-            placeholder="Confirm Password"
-            style={styles.input}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            placeholderTextColor={theme.textTertiary}
-          />
-
-          {confirmPassword.length > 0 && confirmPassword !== password && (
-            <Text style={styles.warningText}>Password does not match</Text>
-          )}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} bounces={false}>
+        <View style={styles.headerSpacer} />
+        
+        <View style={styles.brandingContainer}>
+          <Text style={styles.brandName}>Create Account</Text>
+          <Text style={styles.brandTagline}>Join FairTrade today.</Text>
         </View>
 
-        <View style={styles.termsContainer}>
-          <CheckBox
-            value={termsAccepted}
-            onValueChange={setTermsAccepted}
-            color={termsAccepted ? brandColor : theme.border}
-          />
-          <Text style={styles.termsText}> I agree to the terms and privacy policy.</Text>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.button, { opacity: termsAccepted ? 1 : 0.5 }]}
-          disabled={!termsAccepted || loading}
-          onPress={handleSignup}
-        >
-          <Text style={styles.buttonText}>{loading ? 'Creating...' : 'Create Account'}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.googleButton} onPress={handleGoogle}>
-          <View style={styles.googleContent}>
-            <Image
-              source={require('@/assets/images/google-logo.png')}
-              style={styles.googleLogo}
-              resizeMode="contain"
+        <View style={styles.authCard}>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="person-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+            <TextInput
+              placeholder="Full Name"
+              value={fullName}
+              onChangeText={setFullName}
+              style={styles.input}
+              placeholderTextColor={theme.textTertiary}
             />
-            <Text style={styles.buttonTextgoogle}>Continue with Google</Text>
           </View>
-        </TouchableOpacity>
-      </View>
-      
-      <View style={styles.bottomSpacer} />
-    </ScrollView>
+
+          <View style={styles.inputWrapper}>
+            <Ionicons name="mail-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+            <TextInput
+              placeholder="Email address"
+              value={email}
+              onChangeText={setEmail}
+              style={styles.input}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              placeholderTextColor={theme.textTertiary}
+            />
+          </View>
+
+          <View style={styles.inputWrapper}>
+            <Ionicons name="lock-closed-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+            <TextInput
+              placeholder="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              style={styles.input}
+              placeholderTextColor={theme.textTertiary}
+            />
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ padding: 4 }}>
+              <Ionicons name={showPassword ? "eye-outline" : "eye-off-outline"} size={20} color={theme.textTertiary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.termsContainer}>
+            <CheckBox
+              value={termsAccepted}
+              onValueChange={setTermsAccepted}
+              color={termsAccepted ? brandColor : theme.border}
+              style={styles.checkbox}
+            />
+            <Text style={styles.termsText}>I agree to the Terms & Privacy Policy.</Text>
+          </View>
+
+          <TouchableOpacity 
+            style={[styles.primaryButton, !termsAccepted && { opacity: 0.6 }]} 
+            onPress={handleSignup} 
+            disabled={!termsAccepted || loading}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.primaryButtonText}>{loading ? 'Creating Account...' : 'Sign Up'}</Text>
+            {!loading && <Ionicons name="arrow-forward" size={20} color="#fff" />}
+          </TouchableOpacity>
+
+          <View style={styles.dividerContainer}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <TouchableOpacity style={styles.googleButton} onPress={handleGoogleSignup} activeOpacity={0.8} disabled={loading}>
+            <Image source={require('@/assets/images/google-logo.png')} style={{ width: 24, height: 24, marginRight: 10 }} resizeMode="contain" />
+            <Text style={styles.googleButtonText}>Sign Up with Google</Text>
+          </TouchableOpacity>
+
+          <View style={styles.footerContainer}>
+            <Text style={styles.footerText}>Already have an account? </Text>
+            <TouchableOpacity onPress={() => router.push('/auth/login')}>
+              <Text style={styles.footerLink}>Log In</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
-  scrollContainer: {
-    flexGrow: 1,
-    backgroundColor: theme.background,
-  },
-  topSpacer: {
-    height: screenHeight * 0.08,
-  },
-  contentContainer: {
-    padding: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bottomSpacer: {
-    height: screenHeight * 0.1,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: theme.text,
-    marginBottom: 40,
-    textAlign: 'center',
-    letterSpacing: -0.8,
-  },
-  inputContainer: {
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  input: {
-    width: inputWidth,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 16,
-    fontSize: 16,
-    color: theme.text,
-  },
-  termsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 32,
-    width: inputWidth,
-  },
-  termsText: {
-    marginLeft: 12,
-    flex: 1,
-    flexWrap: 'wrap',
-    color: theme.textSecondary,
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  warningText: {
-    color: '#dc3545',
-    marginBottom: 10,
-    width: inputWidth,
-    textAlign: 'left',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  button: {
-    backgroundColor: brandColor,
-    paddingVertical: 18,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 24,
-    width: inputWidth,
-    shadowColor: brandColor,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  googleButton: {
-    backgroundColor: theme.card,
-    borderWidth: 1.5,
-    borderColor: theme.border,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    width: inputWidth,
-    ...theme.shadow,
-  },
-  googleContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-    letterSpacing: 0.2,
-  },
-  buttonTextgoogle: {
-    color: theme.text,
-    fontWeight: '600',
-    fontSize: 16,
-    letterSpacing: 0.1,
-  },
-  googleLogo: {
-    width: 20,
-    height: 20,
-    marginRight: 12,
-  },
+  container: { flex: 1, backgroundColor: theme.background },
+  heroBackground: { position: 'absolute', top: 0, left: 0, right: 0, height: 300, backgroundColor: brandColor, borderBottomLeftRadius: 40, borderBottomRightRadius: 40 },
+  scrollContent: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 20 },
+  headerSpacer: { height: Platform.OS === 'ios' ? 60 : 70, width: '100%' },
+  brandingContainer: { alignItems: 'center', marginBottom: 30, marginTop: 10 },
+  brandName: { fontSize: 32, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  brandTagline: { fontSize: 16, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
+  authCard: { width: '100%', backgroundColor: theme.card, borderRadius: 24, padding: 24, shadowColor: theme.shadow?.split('(')[0] || '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, borderWidth: 1, borderColor: theme.border, marginBottom: 40 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 16, paddingHorizontal: 16, marginBottom: 16, height: 56 },
+  inputIcon: { marginRight: 12 },
+  input: { flex: 1, fontSize: 16, color: theme.text },
+  termsContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, paddingRight: 10 },
+  checkbox: { width: 20, height: 20, borderRadius: 4, marginRight: 10 },
+  termsText: { color: theme.textSecondary, fontSize: 14, flex: 1 },
+  primaryButton: { flexDirection: 'row', backgroundColor: brandColor, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: brandColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  primaryButtonText: { color: '#fff', fontWeight: '700', fontSize: 16, marginRight: 8 },
+  dividerContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 24 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: theme.border },
+  dividerText: { color: theme.textTertiary, paddingHorizontal: 16, fontSize: 14, fontWeight: '600' },
+  googleButton: { flexDirection: 'row', backgroundColor: theme.surface, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.border },
+  googleButtonText: { color: theme.text, fontWeight: '600', fontSize: 16 },
+  footerContainer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
+  footerText: { color: theme.textSecondary, fontSize: 15 },
+  footerLink: { color: brandColor, fontWeight: '700', fontSize: 15 },
 });

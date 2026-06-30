@@ -2,12 +2,14 @@
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from 'expo-router';
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Alert,
+  ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
-  SafeAreaView,
+  Platform,
+  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -16,6 +18,7 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from './contexts/ThemeContext';
 
 const brandColor = "#4B56E9";
@@ -45,6 +48,59 @@ export default function BecomeSellerScreen() {
   
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAlreadySeller, setIsAlreadySeller] = useState(false);
+
+  // --- Global Custom Modal State ---
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({ visible: false, title: '', message: '' });
+
+  const showAlert = (title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({
+      visible: true,
+      title,
+      message,
+      buttons: buttons || [{ text: 'OK', onPress: () => hideAlert(), style: 'default' }]
+    });
+  };
+
+  const hideAlert = () => setAlertConfig(prev => ({ ...prev, visible: false }));
+
+  // Pre-fetch existing seller data if they have already filled this out before
+  useEffect(() => {
+    const fetchExistingSellerData = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) return;
+
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('store_name, business_info, category, bank_name, account_number, account_holder, is_seller')
+          .eq('id', session.user.id)
+          .single();
+
+        if (data) {
+          if (data.store_name) setStoreName(data.store_name);
+          if (data.business_info) setBusinessInfo(data.business_info);
+          if (data.category) setCategory(data.category);
+          if (data.bank_name) setBankName(data.bank_name);
+          if (data.account_number) setAccountNumber(data.account_number);
+          if (data.account_holder) setAccountHolder(data.account_holder);
+          if (data.is_seller) setIsAlreadySeller(true);
+        }
+      } catch (error) {
+        console.error("Error fetching existing seller data:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchExistingSellerData();
+  }, []);
 
   const handleCategorySelect = (selectedCategory: string) => {
     setCategory(selectedCategory);
@@ -52,47 +108,53 @@ export default function BecomeSellerScreen() {
   };
 
   const handleContinue = async () => {
-    // Basic validation
     if (!storeName.trim() || !category) {
-      Alert.alert("Missing Info", "Please provide at least a Store Name and Category.");
+      showAlert("Missing Info", "Please provide at least a Store Name and Category.");
       return;
     }
 
     try {
       setIsSubmitting(true);
 
-      // 1. Ensure the user is actually logged in
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        Alert.alert("Authentication Required", "You must be logged in to become a seller.");
-        router.replace('/auth/login');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        showAlert("Authentication Required", "You must be logged in to become a seller.", [
+          { text: "Login", style: "default", onPress: () => router.replace('/auth/login') }
+        ]);
         return;
       }
 
-      // 2. Save all the seller data directly to their Supabase user metadata!
-      const { error } = await supabase.auth.updateUser({
+      // 1. Profiles-First: Save all data directly to the database profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          is_seller: true,
+          store_name: storeName,
+          business_info: businessInfo,
+          category: category,
+          bank_name: bankName,
+          account_number: accountNumber,
+          account_holder: accountHolder,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.user.id);
+
+      if (profileError) throw profileError;
+
+      // 2. Backup basic flags to auth metadata
+      await supabase.auth.updateUser({
         data: {
-          isSeller: true, // Helpful flag we can use later
-          storeName,
-          businessInfo,
-          category,
-          bankName,
-          accountNumber,
-          accountHolder,
-          sellerJoinedDate: new Date().toISOString(),
+          isSeller: true,
+          storeName: storeName,
         }
       });
 
-      if (error) throw error;
-
-      console.log("Seller Profile Data saved securely to Supabase!");
-
-      // 3. Navigate to their shiny new synced profile screen
-      router.push("/(seller)/profile"); 
+      // 3. Navigate straight to the Seller Dashboard
+      router.push("/(seller)/dashboard"); 
       
     } catch (error: any) {
       console.error("Error saving seller data:", error);
-      Alert.alert("Error", error.message || "Failed to create seller profile.");
+      showAlert("Error", error.message || "Failed to create seller profile.");
     } finally {
       setIsSubmitting(false);
     }
@@ -109,140 +171,189 @@ export default function BecomeSellerScreen() {
 
   const styles = createStyles(theme);
 
+  if (isLoading) {
+    return (
+      <View style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={brandColor} />
+        <Text style={{ color: theme.textSecondary, marginTop: 12 }}>Loading seller profile...</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor={theme.background}
       />
-      
-      <ScrollView 
-        style={styles.container} 
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.headerContainer}>
-          <Text style={styles.header}>
-            👨‍💼 Become a Seller
-          </Text>
+
+      {/* Global Custom UI Modal for Alerts */}
+      <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={hideAlert}>
+        <View style={styles.modalOverlayAlert}>
+          <View style={styles.modalAlertContainer}>
+            <Text style={styles.modalAlertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalAlertMessage}>{alertConfig.message}</Text>
+            <View style={styles.modalAlertButtonGroup}>
+              {alertConfig.buttons?.map((btn, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => {
+                    hideAlert();
+                    if (btn.onPress) setTimeout(btn.onPress, 100);
+                  }}
+                  style={[
+                    styles.modalAlertBtn,
+                    btn.style === 'destructive' ? styles.modalAlertBtnDestructive : 
+                    btn.style === 'cancel' ? styles.modalAlertBtnCancel : styles.modalAlertBtnDefault
+                  ]}
+                >
+                  <Text style={[
+                    styles.modalAlertBtnText,
+                    btn.style === 'cancel' ? { color: theme.text } : { color: '#fff' }
+                  ]}>
+                    {btn.text}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         </View>
-
-        {/* Form Container */}
-        <View style={styles.formContainer}>
-          {/* Store Name */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Store Name</Text>
-            <TextInput
-              placeholder="e.g. leonardo store"
-              value={storeName}
-              onChangeText={setStoreName}
-              style={styles.input}
-              placeholderTextColor={theme.textTertiary}
-              editable={!isSubmitting}
-            />
+      </Modal>
+      
+      <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView 
+          style={styles.container} 
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Header */}
+          <View style={styles.headerContainer}>
+            <Text style={styles.header}>
+              {isAlreadySeller ? "👨‍💼 Edit Store Details" : "👨‍💼 Become a Seller"}
+            </Text>
+            {isAlreadySeller && (
+               <Text style={styles.subHeader}>Update your active store information below.</Text>
+            )}
           </View>
 
-          {/* Business Info */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Business Info (Optional)</Text>
-            <TextInput
-              placeholder="What do you sell?"
-              value={businessInfo}
-              onChangeText={setBusinessInfo}
-              style={[styles.input, styles.textArea]}
-              placeholderTextColor={theme.textTertiary}
-              multiline
-              numberOfLines={4}
-              editable={!isSubmitting}
-            />
-          </View>
+          {/* Form Container */}
+          <View style={styles.formContainer}>
+            {/* Store Name */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Store Name <Text style={{color: '#ef4444'}}>*</Text></Text>
+              <TextInput
+                placeholder="e.g. leonardo store"
+                value={storeName}
+                onChangeText={setStoreName}
+                style={styles.input}
+                placeholderTextColor={theme.textTertiary}
+                editable={!isSubmitting}
+              />
+            </View>
 
-          {/* Category */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Category</Text>
+            {/* Business Info */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Business Info (Optional)</Text>
+              <TextInput
+                placeholder="What do you sell?"
+                value={businessInfo}
+                onChangeText={setBusinessInfo}
+                style={[styles.input, styles.textArea]}
+                placeholderTextColor={theme.textTertiary}
+                multiline
+                numberOfLines={4}
+                editable={!isSubmitting}
+              />
+            </View>
+
+            {/* Category */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Category <Text style={{color: '#ef4444'}}>*</Text></Text>
+              <TouchableOpacity 
+                style={styles.dropdown}
+                onPress={() => !isSubmitting && setShowCategoryModal(true)}
+                activeOpacity={isSubmitting ? 1 : 0.7}
+              >
+                <Text style={[
+                  styles.dropdownText, 
+                  category ? styles.selectedText : styles.placeholderText
+                ]}>
+                  {category || "Select Category"}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color={theme.textTertiary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Bank Name */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Bank Name</Text>
+              <TextInput
+                placeholder="e.g. Chase Bank"
+                value={bankName}
+                onChangeText={setBankName}
+                style={styles.input}
+                placeholderTextColor={theme.textTertiary}
+                editable={!isSubmitting}
+              />
+            </View>
+
+            {/* Account Number */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Account Number</Text>
+              <TextInput
+                placeholder="••••••••••••"
+                value={accountNumber}
+                onChangeText={setAccountNumber}
+                style={styles.input}
+                placeholderTextColor={theme.textTertiary}
+                secureTextEntry={false} // Often better false for bank accounts so users can verify
+                keyboardType="numeric"
+                editable={!isSubmitting}
+              />
+            </View>
+
+            {/* Account Holder Name */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Account Holder Name</Text>
+              <TextInput
+                placeholder="e.g. John Doe"
+                value={accountHolder}
+                onChangeText={setAccountHolder}
+                style={styles.input}
+                placeholderTextColor={theme.textTertiary}
+                editable={!isSubmitting}
+              />
+            </View>
+
+            {/* Info Note */}
+            <Text style={styles.infoText}>
+              This information helps us verify sellers and{'\n'}enable secure payouts.
+            </Text>
+
+            {/* Continue Button */}
             <TouchableOpacity 
-              style={styles.dropdown}
-              onPress={() => !isSubmitting && setShowCategoryModal(true)}
-              activeOpacity={isSubmitting ? 1 : 0.7}
+              style={[styles.primaryButton, isSubmitting && { opacity: 0.7 }]}
+              onPress={handleContinue}
+              disabled={isSubmitting}
+              activeOpacity={0.8}
             >
-              <Text style={[
-                styles.dropdownText, 
-                category ? styles.selectedText : styles.placeholderText
-              ]}>
-                {category || "Select Category"}
+              <Text style={styles.primaryButtonText}>
+                {isSubmitting ? "Saving Store..." : isAlreadySeller ? "Update Store Details" : "Launch Store Dashboard"}
               </Text>
-              <Ionicons name="chevron-down" size={20} color={theme.textTertiary} />
+            </TouchableOpacity>
+
+            {/* Back to Buyer Mode */}
+            <TouchableOpacity 
+              style={styles.secondaryButton} 
+              onPress={() => router.push('/(tabs)/home')}
+              disabled={isSubmitting}
+            >
+              <Text style={styles.secondaryButtonText}>Back to Buyer Mode</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Bank Name */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Bank Name</Text>
-            <TextInput
-              placeholder="e.g. Chase Bank"
-              value={bankName}
-              onChangeText={setBankName}
-              style={styles.input}
-              placeholderTextColor={theme.textTertiary}
-              editable={!isSubmitting}
-            />
-          </View>
-
-          {/* Account Number */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Account Number</Text>
-            <TextInput
-              placeholder="••••••••••••"
-              value={accountNumber}
-              onChangeText={setAccountNumber}
-              style={styles.input}
-              placeholderTextColor={theme.textTertiary}
-              secureTextEntry
-              keyboardType="numeric"
-              editable={!isSubmitting}
-            />
-          </View>
-
-          {/* Account Holder Name */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Account Holder Name</Text>
-            <TextInput
-              placeholder="e.g. John Doe"
-              value={accountHolder}
-              onChangeText={setAccountHolder}
-              style={styles.input}
-              placeholderTextColor={theme.textTertiary}
-              editable={!isSubmitting}
-            />
-          </View>
-
-          {/* Info Note */}
-          <Text style={styles.infoText}>
-            This information helps us verify sellers and{'\n'}enable secure payouts.
-          </Text>
-
-          {/* Continue Button */}
-          <TouchableOpacity 
-            style={[styles.primaryButton, isSubmitting && { opacity: 0.7 }]}
-            onPress={handleContinue}
-            disabled={isSubmitting}
-          >
-            <Text style={styles.primaryButtonText}>
-              {isSubmitting ? "Setting up Store..." : "Continue to Profile"}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Back to Buyer Mode */}
-          <TouchableOpacity 
-            style={styles.secondaryButton} 
-            onPress={() => router.push('/(tabs)/home')}
-            disabled={isSubmitting}
-          >
-            <Text style={styles.secondaryButtonText}>Back to Buyer Mode</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Category Selection Modal */}
       <Modal
@@ -282,12 +393,16 @@ const createStyles = (theme: any) => StyleSheet.create({
     flex: 1,
     backgroundColor: theme.background,
   },
+  keyboardView: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: theme.background,
   },
   scrollContainer: {
     paddingBottom: 40,
+    flexGrow: 1,
   },
   headerContainer: {
     paddingHorizontal: 20,
@@ -299,6 +414,12 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontWeight: "700",
     textAlign: "center",
     color: theme.text,
+  },
+  subHeader: {
+    fontSize: 14,
+    color: theme.textSecondary,
+    textAlign: "center",
+    marginTop: 8,
   },
   formContainer: {
     paddingHorizontal: 20,
@@ -429,4 +550,15 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.text,
     fontWeight: "500",
   },
+  // Custom Alert Modal Styles
+  modalOverlayAlert: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
+  modalAlertContainer: { backgroundColor: theme.card || "#fff", borderRadius: 24, padding: 24, width: '100%', maxWidth: 320, borderWidth: 1, borderColor: theme.border || "#e1e5e9", shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 20 },
+  modalAlertTitle: { fontSize: 20, fontWeight: 'bold', color: theme.text || "#000", marginBottom: 8, textAlign: 'center' },
+  modalAlertMessage: { fontSize: 15, color: theme.textSecondary || "#666", marginBottom: 24, textAlign: 'center', lineHeight: 22 },
+  modalAlertButtonGroup: { flexDirection: 'column', gap: 12 },
+  modalAlertBtn: { paddingVertical: 14, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  modalAlertBtnDefault: { backgroundColor: brandColor },
+  modalAlertBtnDestructive: { backgroundColor: '#EF4444' },
+  modalAlertBtnCancel: { backgroundColor: theme.surface || "#f0f0f0", borderWidth: 1, borderColor: theme.border || "#e1e5e9" },
+  modalAlertBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 });

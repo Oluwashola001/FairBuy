@@ -1,13 +1,15 @@
-// app/product-success.tsx
+// app/products/product-added-successfully.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Animated,
   Dimensions,
+  Easing,
   Image,
   SafeAreaView,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -16,54 +18,111 @@ import { useTheme } from '../contexts/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
+// --- Dynamic Celebration Component ---
+// Renders actual emojis (Balloons float UP, Confetti falls DOWN)
+const CelebrationItem = ({ type, startX, delay }: { type: 'balloon' | 'confetti' | 'sparkle', startX: number, delay: number }) => {
+  const isBalloon = type === 'balloon';
+  const translateY = useRef(new Animated.Value(isBalloon ? height + 50 : -100)).current;
+  const translateX = useRef(new Animated.Value(startX)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(isBalloon ? Math.random() * 0.5 + 0.8 : Math.random() * 0.5 + 0.5)).current;
+
+  useEffect(() => {
+    // 1. Vertical Movement
+    Animated.loop(
+      Animated.timing(translateY, {
+        toValue: isBalloon ? -200 : height + 100,
+        duration: isBalloon ? 5000 + Math.random() * 4000 : 3000 + Math.random() * 3000,
+        delay: delay,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+
+    // 2. Horizontal Swaying (Wind effect)
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(translateX, {
+          toValue: startX + (Math.random() * 60 + 30),
+          duration: 2000 + Math.random() * 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateX, {
+          toValue: startX - (Math.random() * 60 + 30),
+          duration: 2000 + Math.random() * 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateX, {
+          toValue: startX,
+          duration: 2000 + Math.random() * 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    // 3. Rotation (Tumbling effect)
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(rotate, { toValue: 1, duration: 2500 + Math.random() * 1000, useNativeDriver: true }),
+        Animated.timing(rotate, { toValue: -1, duration: 2500 + Math.random() * 1000, useNativeDriver: true }),
+        Animated.timing(rotate, { toValue: 0, duration: 2500 + Math.random() * 1000, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const spin = rotate.interpolate({
+    inputRange: [-1, 1],
+    outputRange: isBalloon ? ['-15deg', '15deg'] : ['-180deg', '180deg'],
+  });
+
+  // Pick the right emoji
+  let emoji = '🎈';
+  if (type === 'confetti') emoji = Math.random() > 0.5 ? '🎉' : '🎊';
+  if (type === 'sparkle') emoji = '✨';
+
+  return (
+    <Animated.Text
+      style={{
+        position: 'absolute',
+        fontSize: isBalloon ? 50 : 24,
+        transform: [{ translateY }, { translateX }, { rotate: spin }, { scale }],
+        opacity: isBalloon ? 0.9 : 0.8,
+        zIndex: isBalloon ? 1 : 0,
+      }}
+    >
+      {emoji}
+    </Animated.Text>
+  );
+};
+
 export default function ProductSuccessScreen() {
   const { theme, isDark } = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  // Get product details from navigation params
-  const productData = params.productData ? JSON.parse(params.productData) : null;
+  const productData = params.productData ? JSON.parse(params.productData as string) : null;
 
-  const scaleValue = new Animated.Value(0);
-  const fadeValue = new Animated.Value(0);
-  const checkmarkScale = new Animated.Value(0);
-  const checkmarkRotation = new Animated.Value(0);
-  
-  // Balloon animations - 12 balloons with different behaviors
-  const balloon1Y = new Animated.Value(-80);
-  const balloon2Y = new Animated.Value(-120);
-  const balloon3Y = new Animated.Value(-60);
-  const balloon4Y = new Animated.Value(-100);
-  const balloon5Y = new Animated.Value(-140);
-  const balloon6Y = new Animated.Value(-70);
-  const balloon7Y = new Animated.Value(-110);
-  const balloon8Y = new Animated.Value(-90);
-  const balloon9Y = new Animated.Value(-130);
-  const balloon10Y = new Animated.Value(-50);
-  const balloon11Y = new Animated.Value(-160);
-  const balloon12Y = new Animated.Value(-75);
-  
-  // Balloon swing animations (left-right movement)
-  const balloon1X = new Animated.Value(0);
-  const balloon2X = new Animated.Value(0);
-  const balloon3X = new Animated.Value(0);
-  const balloon4X = new Animated.Value(0);
-  const balloon5X = new Animated.Value(0);
-  const balloon6X = new Animated.Value(0);
-  const balloon7X = new Animated.Value(0);
-  const balloon8X = new Animated.Value(0);
-  const balloon9X = new Animated.Value(0);
-  const balloon10X = new Animated.Value(0);
-  const balloon11X = new Animated.Value(0);
-  const balloon12X = new Animated.Value(0);
+  // Main UI Animations
+  const scaleValue = useRef(new Animated.Value(0)).current;
+  const fadeValue = useRef(new Animated.Value(0)).current;
+  const checkmarkScale = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  React.useEffect(() => {
-    // Success animation
+  // Generate random positions for our celebration items
+  const balloons = Array.from({ length: 12 }).map((_, i) => ({ id: `b_${i}`, startX: Math.random() * width, delay: Math.random() * 4000 }));
+  const confetti = Array.from({ length: 20 }).map((_, i) => ({ id: `c_${i}`, startX: Math.random() * width, delay: Math.random() * 3000 }));
+  const sparkles = Array.from({ length: 10 }).map((_, i) => ({ id: `s_${i}`, startX: Math.random() * width, delay: Math.random() * 2000 }));
+
+  useEffect(() => {
+    // 1. Entrance Animation
     Animated.parallel([
       Animated.spring(scaleValue, {
         toValue: 1,
-        tension: 50,
-        friction: 7,
+        tension: 40,
+        friction: 5,
         useNativeDriver: true,
       }),
       Animated.timing(fadeValue, {
@@ -73,306 +132,31 @@ export default function ProductSuccessScreen() {
       }),
     ]).start();
 
-    // Checkmark animation - scale up with slight rotation
+    // 2. Checkmark Pop
     Animated.sequence([
-      Animated.delay(200),
-      Animated.parallel([
-        Animated.spring(checkmarkScale, {
-          toValue: 1.2,
-          tension: 100,
-          friction: 3,
-          useNativeDriver: true,
-        }),
-        Animated.timing(checkmarkRotation, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-      ]),
+      Animated.delay(300),
+      Animated.spring(checkmarkScale, {
+        toValue: 1.2,
+        tension: 100,
+        friction: 3,
+        useNativeDriver: true,
+      }),
       Animated.spring(checkmarkScale, {
         toValue: 1,
         tension: 80,
         friction: 4,
         useNativeDriver: true,
       }),
-    ]).start();
-
-    // Dropping balloons with swinging motion
-    const animateBalloons = () => {
-      // Vertical dropping animations
-      const dropAnimations = [
-        Animated.loop(
-          Animated.timing(balloon1Y, {
-            toValue: height + 100,
-            duration: 6000,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon2Y, {
-            toValue: height + 100,
-            duration: 7000,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon3Y, {
-            toValue: height + 100,
-            duration: 5500,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon4Y, {
-            toValue: height + 100,
-            duration: 6500,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon5Y, {
-            toValue: height + 100,
-            duration: 8000,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon6Y, {
-            toValue: height + 100,
-            duration: 5800,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon7Y, {
-            toValue: height + 100,
-            duration: 7200,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon8Y, {
-            toValue: height + 100,
-            duration: 6200,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon9Y, {
-            toValue: height + 100,
-            duration: 7800,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon10Y, {
-            toValue: height + 100,
-            duration: 5300,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon11Y, {
-            toValue: height + 100,
-            duration: 6800,
-            useNativeDriver: true,
-          })
-        ),
-        Animated.loop(
-          Animated.timing(balloon12Y, {
-            toValue: height + 100,
-            duration: 6100,
-            useNativeDriver: true,
-          })
-        ),
-      ];
-
-      // Horizontal swinging animations
-      const swingAnimations = [
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon1X, {
-              toValue: 20,
-              duration: 2000,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon1X, {
-              toValue: -20,
-              duration: 2000,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon2X, {
-              toValue: -15,
-              duration: 2500,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon2X, {
-              toValue: 15,
-              duration: 2500,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon3X, {
-              toValue: 25,
-              duration: 1800,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon3X, {
-              toValue: -25,
-              duration: 1800,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon4X, {
-              toValue: -18,
-              duration: 2200,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon4X, {
-              toValue: 18,
-              duration: 2200,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon5X, {
-              toValue: 12,
-              duration: 2800,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon5X, {
-              toValue: -12,
-              duration: 2800,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon6X, {
-              toValue: -22,
-              duration: 1900,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon6X, {
-              toValue: 22,
-              duration: 1900,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon7X, {
-              toValue: 16,
-              duration: 2400,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon7X, {
-              toValue: -16,
-              duration: 2400,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon8X, {
-              toValue: -14,
-              duration: 2100,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon8X, {
-              toValue: 14,
-              duration: 2100,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon9X, {
-              toValue: 19,
-              duration: 2600,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon9X, {
-              toValue: -19,
-              duration: 2600,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon10X, {
-              toValue: -21,
-              duration: 1700,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon10X, {
-              toValue: 21,
-              duration: 1700,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon11X, {
-              toValue: 13,
-              duration: 2700,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon11X, {
-              toValue: -13,
-              duration: 2700,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(balloon12X, {
-              toValue: -17,
-              duration: 2300,
-              useNativeDriver: true,
-            }),
-            Animated.timing(balloon12X, {
-              toValue: 17,
-              duration: 2300,
-              useNativeDriver: true,
-            }),
-          ])
-        ),
-      ];
-
-      Animated.parallel([...dropAnimations, ...swingAnimations]).start();
-    };
-
-    // Start balloon animation after a short delay
-    setTimeout(animateBalloons, 500);
+    ]).start(() => {
+      // 3. Continuous Pulsing Glow around Checkmark
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.15, duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
+        ])
+      ).start();
+    });
   }, []);
-
-  const handleGoHome = () => {
-    router.push('/(seller)/dashboard');
-  };
-
-  const handleAddAnother = () => {
-    router.back();
-  };
 
   const styles = createStyles(theme);
 
@@ -380,221 +164,38 @@ export default function ProductSuccessScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar style={isDark ? "light" : "dark"} />
       
-      {/* Animated Dropping Balloons */}
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon1, 
-        { 
-          transform: [
-            { translateY: balloon1Y },
-            { translateX: balloon1X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody1} />
-        <View style={styles.balloonString} />
-      </Animated.View>
+      {/* Background Celebration Elements */}
+      <View style={styles.celebrationLayer} pointerEvents="none">
+        {confetti.map((item) => <CelebrationItem key={item.id} type="confetti" startX={item.startX} delay={item.delay} />)}
+        {sparkles.map((item) => <CelebrationItem key={item.id} type="sparkle" startX={item.startX} delay={item.delay} />)}
+        {balloons.map((item) => <CelebrationItem key={item.id} type="balloon" startX={item.startX} delay={item.delay} />)}
+      </View>
 
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon2, 
-        { 
-          transform: [
-            { translateY: balloon2Y },
-            { translateX: balloon2X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody2} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon3, 
-        { 
-          transform: [
-            { translateY: balloon3Y },
-            { translateX: balloon3X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody3} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon4, 
-        { 
-          transform: [
-            { translateY: balloon4Y },
-            { translateX: balloon4X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody4} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon5, 
-        { 
-          transform: [
-            { translateY: balloon5Y },
-            { translateX: balloon5X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody5} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon6, 
-        { 
-          transform: [
-            { translateY: balloon6Y },
-            { translateX: balloon6X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody6} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon7, 
-        { 
-          transform: [
-            { translateY: balloon7Y },
-            { translateX: balloon7X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody7} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon8, 
-        { 
-          transform: [
-            { translateY: balloon8Y },
-            { translateX: balloon8X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody8} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon9, 
-        { 
-          transform: [
-            { translateY: balloon9Y },
-            { translateX: balloon9X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody9} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon10, 
-        { 
-          transform: [
-            { translateY: balloon10Y },
-            { translateX: balloon10X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody10} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon11, 
-        { 
-          transform: [
-            { translateY: balloon11Y },
-            { translateX: balloon11X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody11} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      <Animated.View style={[
-        styles.balloon, 
-        styles.balloon12, 
-        { 
-          transform: [
-            { translateY: balloon12Y },
-            { translateX: balloon12X }
-          ] 
-        }
-      ]}>
-        <View style={styles.balloonBody12} />
-        <View style={styles.balloonString} />
-      </Animated.View>
-
-      {/* Header */}
+      {/* Close Button */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.closeButton}
-          onPress={() => router.push('/(tabs)/home')}
-        >
+        <TouchableOpacity style={styles.closeButton} onPress={() => router.push('/(seller)/dashboard')} activeOpacity={0.7}>
           <Ionicons name="close" size={24} color={theme.textSecondary} />
         </TouchableOpacity>
       </View>
 
-      {/* Success Animation */}
-      <Animated.View 
-        style={[
-          styles.successContainer,
-          {
-            transform: [{ scale: scaleValue }],
-            opacity: fadeValue,
-          }
-        ]}
-      >        
-        <Animated.View 
-          style={[
-            styles.successIcon,
-            {
-              transform: [
-                { scale: checkmarkScale },
-                { 
-                  rotate: checkmarkRotation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '10deg'],
-                  })
-                }
-              ]
-            }
-          ]}
-        >
-          <Ionicons name="checkmark-circle" size={80} color="#00C851" />
-        </Animated.View>
+      {/* Main Success Content */}
+      <Animated.View style={[styles.successContainer, { transform: [{ scale: scaleValue }], opacity: fadeValue }]}>
         
-        <Text style={styles.successTitle}>Product Added Successfully!</Text>
+        {/* Glowing Checkmark */}
+        <View style={styles.iconWrapper}>
+          <Animated.View style={[styles.glowRing, { transform: [{ scale: pulseAnim }] }]} />
+          <Animated.View style={{ transform: [{ scale: checkmarkScale }] }}>
+            <Ionicons name="checkmark-circle" size={100} color="#10B981" />
+          </Animated.View>
+        </View>
+        
+        <Text style={styles.successTitle}>Product Live! 🎉</Text>
         <Text style={styles.successSubtitle}>
-          Your product is now live and available to buyers
+          Your product has successfully launched and is now live for buyers.
         </Text>
       </Animated.View>
 
-      {/* Product Preview */}
+      {/* Product Preview Card */}
       {productData && (
         <Animated.View style={[styles.productPreview, { opacity: fadeValue }]}>
           <View style={styles.previewCard}>
@@ -607,11 +208,12 @@ export default function ProductSuccessScreen() {
             )}
             
             <View style={styles.previewDetails}>
-              <Text style={styles.previewName} numberOfLines={2}>
-                {productData.name}
-              </Text>
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>LIVE</Text>
+              </View>
+              <Text style={styles.previewName} numberOfLines={2}>{productData.name}</Text>
               <Text style={styles.previewPrice}>${productData.price}</Text>
-              <Text style={styles.previewCategory}>{productData.category}</Text>
             </View>
           </View>
         </Animated.View>
@@ -619,268 +221,117 @@ export default function ProductSuccessScreen() {
 
       {/* Action Buttons */}
       <Animated.View style={[styles.actionContainer, { opacity: fadeValue }]}>
-        <TouchableOpacity 
-          style={styles.primaryButton}
-          onPress={handleGoHome}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="home-outline" size={20} color="#fff" />
-          <Text style={styles.primaryButtonText}>Go to Home</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/(seller)/dashboard')} activeOpacity={0.9}>
+          <Ionicons name="grid-outline" size={20} color="#fff" />
+          <Text style={styles.primaryButtonText}>View Dashboard</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.secondaryButton}
-          onPress={handleAddAnother}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="add-outline" size={20} color="#4B56E9" />
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => router.back()} activeOpacity={0.7}>
+          <Ionicons name="add-circle-outline" size={22} color="#4B56E9" />
           <Text style={styles.secondaryButtonText}>Add Another Product</Text>
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Stats */}
-      <Animated.View style={[styles.statsContainer, { opacity: fadeValue }]}>
-        <View style={styles.statItem}>
-          <Ionicons name="eye-outline" size={16} color={theme.textSecondary} />
-          <Text style={styles.statText}>Visible to all buyers</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Ionicons name="time-outline" size={16} color={theme.textSecondary} />
-          <Text style={styles.statText}>Live immediately</Text>
-        </View>
-      </Animated.View>
     </SafeAreaView>
   );
 }
 
-const createStyles = (theme) => ({
+const createStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.background,
+  },
+  celebrationLayer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 32,
+    zIndex: 10,
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: theme.surface,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 6,
     elevation: 3,
   },
   successContainer: {
     alignItems: 'center',
-    marginTop: 40,
+    marginTop: 20,
     marginBottom: 30,
     zIndex: 2,
+    paddingHorizontal: 20,
   },
-  successIcon: {
-    marginBottom: 20,
-  },
-  // Balloon Styles
-  balloon: {
-    position: 'absolute',
+  iconWrapper: {
+    position: 'relative',
+    width: 140,
+    height: 140,
+    justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0.9,
+    marginBottom: 16,
   },
-  balloon1: { left: '8%' },
-  balloon2: { left: '18%' },
-  balloon3: { left: '28%' },
-  balloon4: { left: '38%' },
-  balloon5: { left: '48%' },
-  balloon6: { left: '58%' },
-  balloon7: { left: '68%' },
-  balloon8: { left: '78%' },
-  balloon9: { left: '12%' },
-  balloon10: { left: '22%' },
-  balloon11: { left: '42%' },
-  balloon12: { left: '72%' },
-  
-  // Balloon bodies with different colors
-  balloonBody1: {
-    width: 35,
-    height: 45,
-    backgroundColor: '#FF6B6B',
-    borderRadius: 17.5,
-    borderTopLeftRadius: 17.5,
-    borderTopRightRadius: 17.5,
-    borderBottomLeftRadius: 17.5,
-    borderBottomRightRadius: 0,
+  glowRing: {
+    position: 'absolute',
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
   },
-  balloonBody2: {
-    width: 32,
-    height: 42,
-    backgroundColor: '#4ECDC4',
-    borderRadius: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody3: {
-    width: 38,
-    height: 48,
-    backgroundColor: '#45B7D1',
-    borderRadius: 19,
-    borderTopLeftRadius: 19,
-    borderTopRightRadius: 19,
-    borderBottomLeftRadius: 19,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody4: {
-    width: 34,
-    height: 44,
-    backgroundColor: '#96CEB4',
-    borderRadius: 17,
-    borderTopLeftRadius: 17,
-    borderTopRightRadius: 17,
-    borderBottomLeftRadius: 17,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody5: {
-    width: 36,
-    height: 46,
-    backgroundColor: '#FFEAA7',
-    borderRadius: 18,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody6: {
-    width: 33,
-    height: 43,
-    backgroundColor: '#A29BFE',
-    borderRadius: 16.5,
-    borderTopLeftRadius: 16.5,
-    borderTopRightRadius: 16.5,
-    borderBottomLeftRadius: 16.5,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody7: {
-    width: 37,
-    height: 47,
-    backgroundColor: '#FD79A8',
-    borderRadius: 18.5,
-    borderTopLeftRadius: 18.5,
-    borderTopRightRadius: 18.5,
-    borderBottomLeftRadius: 18.5,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody8: {
-    width: 35,
-    height: 45,
-    backgroundColor: '#00B894',
-    borderRadius: 17.5,
-    borderTopLeftRadius: 17.5,
-    borderTopRightRadius: 17.5,
-    borderBottomLeftRadius: 17.5,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody9: {
-    width: 39,
-    height: 49,
-    backgroundColor: '#E17055',
-    borderRadius: 19.5,
-    borderTopLeftRadius: 19.5,
-    borderTopRightRadius: 19.5,
-    borderBottomLeftRadius: 19.5,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody10: {
-    width: 31,
-    height: 41,
-    backgroundColor: '#00CEC9',
-    borderRadius: 15.5,
-    borderTopLeftRadius: 15.5,
-    borderTopRightRadius: 15.5,
-    borderBottomLeftRadius: 15.5,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody11: {
-    width: 36,
-    height: 46,
-    backgroundColor: '#6C5CE7',
-    borderRadius: 18,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 0,
-  },
-  balloonBody12: {
-    width: 34,
-    height: 44,
-    backgroundColor: '#74B9FF',
-    borderRadius: 17,
-    borderTopLeftRadius: 17,
-    borderTopRightRadius: 17,
-    borderBottomLeftRadius: 17,
-    borderBottomRightRadius: 0,
-  },
-  
-  // Balloon string
-  balloonString: {
-    width: 1,
-    height: 40,
-    backgroundColor: '#666',
-    marginTop: -2,
-  },
-  
   successTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '900',
     color: theme.text,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+    letterSpacing: -0.5,
   },
   successSubtitle: {
     fontSize: 16,
     color: theme.textSecondary,
     textAlign: 'center',
-    paddingHorizontal: 40,
-    lineHeight: 22,
+    paddingHorizontal: 20,
+    lineHeight: 24,
+    fontWeight: '500',
   },
   productPreview: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    paddingHorizontal: 24,
+    marginBottom: 40,
+    zIndex: 5,
   },
   previewCard: {
     backgroundColor: theme.card,
-    borderRadius: 16,
+    borderRadius: 24,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowColor: theme.shadow?.split('(')[0] || '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   previewImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
+    width: 90,
+    height: 90,
+    borderRadius: 16,
     backgroundColor: theme.surface,
   },
   placeholderImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
+    width: 90,
+    height: 90,
+    borderRadius: 16,
     backgroundColor: theme.surface,
     justifyContent: 'center',
     alignItems: 'center',
@@ -888,85 +339,83 @@ const createStyles = (theme) => ({
   previewDetails: {
     flex: 1,
     marginLeft: 16,
+    justifyContent: 'center',
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginRight: 4,
+  },
+  liveText: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   previewName: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: theme.text,
-    marginBottom: 4,
+    marginBottom: 6,
+    lineHeight: 22,
   },
   previewPrice: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '800',
     color: '#4B56E9',
-    marginBottom: 4,
-  },
-  previewCategory: {
-    fontSize: 14,
-    color: theme.textSecondary,
-    backgroundColor: theme.surface,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
   },
   actionContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: 24,
+    marginTop: 'auto',
+    marginBottom: 40,
+    zIndex: 10,
   },
   primaryButton: {
     backgroundColor: '#4B56E9',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginBottom: 12,
+    paddingVertical: 18,
+    borderRadius: 16,
+    marginBottom: 16,
     shadowColor: '#4B56E9',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowRadius: 12,
+    elevation: 8,
   },
   primaryButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    fontSize: 17,
+    fontWeight: '700',
+    marginLeft: 10,
   },
   secondaryButton: {
     backgroundColor: theme.surface,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 18,
+    borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#4B56E9',
+    borderColor: 'rgba(75, 86, 233, 0.2)',
   },
   secondaryButtonText: {
     color: '#4B56E9',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     marginLeft: 8,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 20,
-  },
-  statItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 20,
-  },
-  statText: {
-    fontSize: 14,
-    color: theme.textSecondary,
-    marginLeft: 4,
   },
 });

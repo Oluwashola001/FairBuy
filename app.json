@@ -1,68 +1,70 @@
 {
-  "expo": {
-    "name": "my-app",
-    "slug": "my-app",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
-    "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "splash": {
-      "backgroundColor": "#4B56E9",
-      "resizeMode": "contain"
-    },
-    "ios": {
-      "supportsTablet": true,
-      "splash": {
-        "backgroundColor": "#ffffff",
-        "resizeMode": "contain"
-      }
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "splash": {
-        "backgroundColor": "#ffffff",
-        "resizeMode": "contain"
-      },
-      "edgeToEdgeEnabled": true,
-      "package": "com.henrywalkerme.myapp"
-    },
-    "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
-    },
-    "plugins": [
-      "expo-router",
-      "expo-splash-screen",
-      "expo-web-browser",
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take product photos."
-        }
-      ]
-      
-    ],
-    "experiments": {
-      "typedRoutes": true
-    },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "0f0fbb3c-6aed-493b-bee6-9b25c76baed3"
-      }
-    },
-    "owner": "henrywalkerme",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/0f0fbb3c-6aed-493b-bee6-9b25c76baed3"
-    }
-  }
+"expo": {
+"name": "FairTrade",
+"slug": "my-app",
+"version": "1.0.0",
+"orientation": "portrait",
+"icon": "./assets/images/icon.png",
+"scheme": "myapp",
+"userInterfaceStyle": "automatic",
+"newArchEnabled": true,
+"splash": {
+"image": "./assets/images/logo.png",
+"backgroundColor": "#FFFFFF",
+"resizeMode": "contain"
+},
+"ios": {
+"supportsTablet": true,
+"splash": {
+"image": "./assets/images/logo.png",
+"backgroundColor": "#FFFFFF",
+"resizeMode": "contain"
+}
+},
+"android": {
+"adaptiveIcon": {
+"foregroundImage": "./assets/images/adaptive-icon.png",
+"backgroundColor": "#FFFFFF"
+},
+"splash": {
+"image": "./assets/images/logo.png",
+"backgroundColor": "#FFFFFF",
+"resizeMode": "contain"
+},
+"edgeToEdgeEnabled": true,
+"package": "com.henrywalkerme.myapp"
+},
+"web": {
+"bundler": "metro",
+"output": "static",
+"favicon": "./assets/images/favicon.png"
+},
+"plugins": [
+"expo-router",
+"expo-splash-screen",
+"expo-web-browser",
+[
+"expo-camera",
+{
+"cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take product photos."
+}
+]
+],
+"experiments": {
+"typedRoutes": true
+},
+"extra": {
+"router": {},
+"eas": {
+"projectId": "0f0fbb3c-6aed-493b-bee6-9b25c76baed3"
+}
+},
+"owner": "henrywalkerme",
+"runtimeVersion": {
+"policy": "appVersion"
+},
+"updates": {
+"url": "https://u.expo.dev/0f0fbb3c-6aed-493b-bee6-9b25c76baed3"
+}
+}
 }

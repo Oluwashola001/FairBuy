@@ -6,23 +6,26 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Dimensions,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Animated,
+  Dimensions,
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { useTheme } from "./contexts/ThemeContext";
 
 const { width } = Dimensions.get('window');
+const brandColor = '#4B56E9';
 
 interface Message {
   id: string;
@@ -45,10 +48,13 @@ export default function ChatRoomScreen() {
   const recordingAnimation = useRef(new Animated.Value(0)).current;
 
   // Dynamically get the chat details from the route parameters
-  const { conversationId, recipientId, recipientNameParam } = useLocalSearchParams<{
+  const { conversationId, recipientId, recipientNameParam, recipientAvatarParam, initialImageUri, initialMessage } = useLocalSearchParams<{
     conversationId: string;
     recipientId: string;
     recipientNameParam: string;
+    recipientAvatarParam?: string;
+    initialImageUri?: string;
+    initialMessage?: string;
   }>();
 
   const recipientName = recipientNameParam || "User";
@@ -57,25 +63,51 @@ export default function ChatRoomScreen() {
   // States
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
+  const [pendingAttachment, setPendingAttachment] = useState<{uri: string, type: 'image' | 'document', name?: string, size?: number} | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
   const [inputHeight, setInputHeight] = useState(40);
-  const [isOnline, setIsOnline] = useState(true); // Can be wired to presence later
+  const [isOnline, setIsOnline] = useState(true); 
+
+  // --- Global Custom Modal State ---
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({ visible: false, title: '', message: '' });
+
+  const showAlert = (title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({
+      visible: true,
+      title,
+      message,
+      buttons: buttons || [{ text: 'OK', onPress: () => hideAlert(), style: 'default' }]
+    });
+  };
+
+  const hideAlert = () => setAlertConfig(prev => ({ ...prev, visible: false }));
+
+  // Process Initial Context (Product Inquiry)
+  useEffect(() => {
+    if (initialImageUri) {
+      setPendingAttachment({ uri: initialImageUri, type: 'image' });
+      if (initialMessage) setNewMessage(initialMessage);
+    }
+  }, [initialImageUri, initialMessage]);
 
   // 1. Initialize User & Messages
   useEffect(() => {
     const initChat = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        Alert.alert("Error", "You must be logged in to chat.");
-        router.back();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.user) {
+        showAlert("Error", "You must be logged in to chat.", [{ text: "Go Back", onPress: () => router.back(), style: 'default' }]);
         return;
       }
-      setCurrentUserId(user.id);
+      setCurrentUserId(session.user.id);
 
       if (conversationId) {
-        // Fetch historical messages
         const { data, error } = await supabase
           .from("messages")
           .select("*")
@@ -85,7 +117,7 @@ export default function ChatRoomScreen() {
         if (!error && data) {
           setMessages(data.map(msg => ({
             ...msg,
-            status: msg.sender_id === user.id ? 'sent' : 'delivered'
+            status: msg.sender_id === session.user.id ? 'sent' : 'delivered'
           })));
           
           setTimeout(() => {
@@ -114,7 +146,6 @@ export default function ChatRoomScreen() {
         },
         (payload) => {
           const newMsg = payload.new as Message;
-          // If the message is NOT from us, add it to the list (we add ours optimistically)
           if (newMsg.sender_id !== currentUserId) {
             setMessages(prev => [...prev, { ...newMsg, status: 'delivered' }]);
             setTimeout(() => {
@@ -132,12 +163,20 @@ export default function ChatRoomScreen() {
 
   // 3. Send Text Message
   const sendMessage = async () => {
-    if (newMessage.trim() === "" || !currentUserId || !conversationId) return;
+    if ((newMessage.trim() === "" && !pendingAttachment) || !currentUserId || !conversationId) return;
+
+    // If there's an image/document attached, use the file sender instead
+    if (pendingAttachment) {
+      await sendFileMessage(pendingAttachment.uri, pendingAttachment.type, pendingAttachment.name, pendingAttachment.size, newMessage.trim());
+      setPendingAttachment(null);
+      setNewMessage("");
+      setInputHeight(40);
+      return;
+    }
 
     const msgContent = newMessage.trim();
     const tempId = Date.now().toString();
 
-    // Optimistic UI update
     const tempMessage: Message = {
       id: tempId,
       content: msgContent,
@@ -155,12 +194,11 @@ export default function ChatRoomScreen() {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
 
-    // Push to DB
     const { data, error } = await supabase.from("messages").insert([
       {
         conversation_id: conversationId,
         sender_id: currentUserId,
-        receiver_id: recipientId, // Required by your table
+        receiver_id: recipientId,
         content: msgContent,
         message_type: 'text',
         is_read: false
@@ -171,10 +209,7 @@ export default function ChatRoomScreen() {
       console.error("Send error:", error);
       setMessages(prev => prev.map(msg => msg.id === tempId ? { ...msg, status: 'failed' } : msg));
     } else {
-      // Replace temp message with real DB message to get the real UUID
       setMessages(prev => prev.map(msg => msg.id === tempId ? { ...data, status: 'sent' } : msg));
-      
-      // Update Conversation updated_at timestamp
       await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
     }
   };
@@ -207,13 +242,13 @@ export default function ChatRoomScreen() {
   };
 
   // 5. Send File Message
-  const sendFileMessage = async (fileUri: string, messageType: 'image' | 'document', fileName?: string, fileSize?: number) => {
+  const sendFileMessage = async (fileUri: string, messageType: 'image' | 'document', fileName?: string, fileSize?: number, customText?: string) => {
     if (!currentUserId || !conversationId) return;
 
     const tempId = Date.now().toString();
     const tempMessage: Message = {
       id: tempId,
-      content: messageType === 'image' ? '📷 Photo' : `📄 ${fileName || 'Document'}`,
+      content: customText || (messageType === 'image' ? '📷 Photo' : `📄 ${fileName || 'Document'}`),
       sender_id: currentUserId,
       created_at: new Date().toISOString(),
       message_type: messageType,
@@ -228,10 +263,8 @@ export default function ChatRoomScreen() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      // Actually upload
-      const publicUrl = await uploadToStorage(fileUri, messageType);
+      const publicUrl = fileUri.startsWith('http') ? fileUri : await uploadToStorage(fileUri, messageType);
 
-      // Insert to DB
       const { data, error } = await supabase.from("messages").insert([
         {
           conversation_id: conversationId,
@@ -254,7 +287,7 @@ export default function ChatRoomScreen() {
       
     } catch (err) {
       console.error("File upload/send error:", err);
-      Alert.alert("Error", "Failed to send attachment.");
+      showAlert("Error", "Failed to send attachment.");
       setMessages(prev => prev.map(msg => msg.id === tempId ? { ...msg, status: 'failed' } : msg));
     }
   };
@@ -276,39 +309,39 @@ export default function ChatRoomScreen() {
       }
     } catch (error) {
       console.error('Attachment error:', error);
-      Alert.alert("Error", "Failed to process attachment. Please try again.");
+      showAlert("Error", "Failed to process attachment. Please try again.");
     }
   };
 
   const handleCamera = async () => {
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
     if (!permissionResult.granted) {
-      Alert.alert('Permission Required', 'Please allow camera access.');
+      showAlert('Permission Required', 'Please allow camera access to take a photo.');
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, // REVERTED to fix Native Crash!
+      quality: 0.3,
     });
 
     if (!result.canceled && result.assets?.[0]) {
-      await sendFileMessage(result.assets[0].uri, 'image');
+      setPendingAttachment({ uri: result.assets[0].uri, type: 'image' });
     }
   };
 
   const handleGallery = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissionResult.granted) {
-      Alert.alert('Permission Required', 'Please allow gallery access.');
+      showAlert('Permission Required', 'Please allow gallery access to select a photo.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, // REVERTED to fix Native Crash!
+      quality: 0.3,
     });
 
     if (!result.canceled && result.assets?.[0]) {
-      await sendFileMessage(result.assets[0].uri, 'image');
+      setPendingAttachment({ uri: result.assets[0].uri, type: 'image' });
     }
   };
 
@@ -316,7 +349,7 @@ export default function ChatRoomScreen() {
     const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
     if (!result.canceled && result.assets?.[0]) {
       const doc = result.assets[0];
-      await sendFileMessage(doc.uri, 'document', doc.name, doc.size);
+      setPendingAttachment({ uri: doc.uri, type: 'document', name: doc.name, size: doc.size });
     }
   };
 
@@ -324,7 +357,7 @@ export default function ChatRoomScreen() {
     if (isRecording) {
       setIsRecording(false);
       Animated.timing(recordingAnimation, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-      Alert.alert("Voice Note", "Voice recording functionality requires native setup.");
+      showAlert("Voice Note", "Voice recording functionality requires native iOS/Android permissions setup.");
     } else {
       setIsRecording(true);
       Animated.loop(
@@ -336,7 +369,6 @@ export default function ChatRoomScreen() {
     }
   };
 
-  // Formatters
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
@@ -367,7 +399,6 @@ export default function ChatRoomScreen() {
     const isFirstInGroup = prevMessage?.sender_id !== item.sender_id;
     const isLastInGroup = nextMessage?.sender_id !== item.sender_id;
 
-    // We check both image_url and file_url for compatibility with DB structure
     const displayImageUrl = item.image_url || item.file_url;
 
     const renderMessageContent = () => {
@@ -381,6 +412,16 @@ export default function ChatRoomScreen() {
                   style={styles.imageMessage}
                   resizeMode="cover"
                 />
+              )}
+              {/* --- UI FIX: Accurately render custom text below the image --- */}
+              {item.content && item.content !== '📷 Photo' && (
+                <Text style={[
+                  styles.messageText, 
+                  isMyMessage ? styles.myMessageText : styles.otherMessageText,
+                  { marginTop: 8, marginBottom: 4, paddingHorizontal: 4 }
+                ]}>
+                  {item.content}
+                </Text>
               )}
               <View style={styles.messageInfo}>
                 <Text style={[styles.messageTime, isMyMessage ? styles.myMessageTime : styles.otherMessageTime]}>
@@ -441,8 +482,12 @@ export default function ChatRoomScreen() {
         isLastInGroup && styles.lastInGroup
       ]}>
         {showAvatar && (
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{recipientName.charAt(0).toUpperCase()}</Text>
+          <View style={[styles.avatar, recipientAvatarParam && { backgroundColor: 'transparent' }]}>
+            {recipientAvatarParam ? (
+              <Image source={{ uri: recipientAvatarParam }} style={styles.messageAvatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>{recipientName.charAt(0).toUpperCase()}</Text>
+            )}
           </View>
         )}
         
@@ -462,20 +507,55 @@ export default function ChatRoomScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={hideAlert}>
+        <View style={styles.modalOverlayAlert}>
+          <View style={styles.modalAlertContainer}>
+            <Text style={styles.modalAlertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalAlertMessage}>{alertConfig.message}</Text>
+            <View style={styles.modalAlertButtonGroup}>
+              {alertConfig.buttons?.map((btn, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => {
+                    hideAlert();
+                    if (btn.onPress) setTimeout(btn.onPress, 100);
+                  }}
+                  style={[
+                    styles.modalAlertBtn,
+                    btn.style === 'destructive' ? styles.modalAlertBtnDestructive : 
+                    btn.style === 'cancel' ? styles.modalAlertBtnCancel : styles.modalAlertBtnDefault
+                  ]}
+                >
+                  <Text style={[
+                    styles.modalAlertBtnText,
+                    btn.style === 'cancel' ? { color: theme.text } : { color: '#fff' }
+                  ]}>
+                    {btn.text}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <KeyboardAvoidingView 
         style={styles.keyboardView} 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={theme?.text ?? "#333"} />
           </TouchableOpacity>
           
           <View style={styles.contactInfo}>
-            <View style={styles.contactAvatar}>
-              <Text style={styles.contactAvatarText}>{recipientName.charAt(0).toUpperCase()}</Text>
+            <View style={[styles.contactAvatar, !recipientAvatarParam && { backgroundColor: brandColor }]}>
+              {recipientAvatarParam ? (
+                <Image source={{ uri: recipientAvatarParam }} style={styles.headerAvatarImage} />
+              ) : (
+                <Text style={styles.contactAvatarText}>{recipientName.charAt(0).toUpperCase()}</Text>
+              )}
               {isOnline && <View style={styles.onlineIndicator} />}
             </View>
             
@@ -497,7 +577,6 @@ export default function ChatRoomScreen() {
           </View>
         </View>
 
-        {/* Messages */}
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -510,7 +589,6 @@ export default function ChatRoomScreen() {
           keyboardShouldPersistTaps="handled"
         />
 
-        {/* Typing Indicator */}
         {isTyping && (
           <View style={styles.typingContainer}>
             <View style={styles.typingBubble}>
@@ -523,7 +601,7 @@ export default function ChatRoomScreen() {
           </View>
         )}
 
-        {/* Attachment Options */}
+        {/* Attachment Options Tray */}
         {showAttachmentOptions && (
           <View style={styles.attachmentOptions}>
             <TouchableOpacity 
@@ -558,11 +636,37 @@ export default function ChatRoomScreen() {
           </View>
         )}
 
-        {/* Input Container */}
+        {pendingAttachment && (
+          <View style={styles.pendingAttachmentContainer}>
+            <View style={styles.pendingAttachmentPreview}>
+              {pendingAttachment.type === 'image' ? (
+                <Image source={{ uri: pendingAttachment.uri }} style={styles.pendingImage} />
+              ) : (
+                <View style={styles.pendingDocument}>
+                  <Ionicons name="document" size={32} color={theme?.primary ?? "#4B56E9"} />
+                  <Text style={styles.pendingDocumentName} numberOfLines={1}>{pendingAttachment.name || 'Document'}</Text>
+                </View>
+              )}
+              <TouchableOpacity 
+                style={styles.removeAttachmentBtn} 
+                onPress={() => setPendingAttachment(null)}
+              >
+                <Ionicons name="close-circle" size={24} color="#ef4444" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={styles.inputContainer}>
           <TouchableOpacity 
             style={styles.attachmentBtn}
-            onPress={() => setShowAttachmentOptions(!showAttachmentOptions)}
+            onPress={() => {
+              // Dismiss keyboard so menu is clearly visible
+              if (!showAttachmentOptions) {
+                Keyboard.dismiss();
+              }
+              setShowAttachmentOptions(!showAttachmentOptions);
+            }}
           >
             <Ionicons 
               name={showAttachmentOptions ? "close" : "add"} 
@@ -579,6 +683,7 @@ export default function ChatRoomScreen() {
               value={newMessage}
               onChangeText={setNewMessage}
               multiline
+              onFocus={() => setShowAttachmentOptions(false)} // Auto hide menu when typing
               onContentSizeChange={(e) => 
                 setInputHeight(Math.min(120, e.nativeEvent.contentSize.height))
               }
@@ -586,7 +691,7 @@ export default function ChatRoomScreen() {
             />
           </View>
 
-          {newMessage.trim() ? (
+          {newMessage.trim() || pendingAttachment ? (
             <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
               <Ionicons name="send" size={20} color="#fff" />
             </TouchableOpacity>
@@ -625,6 +730,67 @@ const createStyles = (theme: any) =>
     keyboardView: {
       flex: 1,
     },
+    modalOverlayAlert: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+    },
+    modalAlertContainer: {
+      backgroundColor: theme?.card || "#fff",
+      borderRadius: 24,
+      padding: 24,
+      width: '100%',
+      maxWidth: 320,
+      borderWidth: 1,
+      borderColor: theme?.border || "#e1e5e9",
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.25,
+      shadowRadius: 16,
+      elevation: 20,
+    },
+    modalAlertTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme?.text || "#000",
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    modalAlertMessage: {
+      fontSize: 15,
+      color: theme?.textSecondary || "#666",
+      marginBottom: 24,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    modalAlertButtonGroup: {
+      flexDirection: 'column',
+      gap: 12,
+    },
+    modalAlertBtn: {
+      paddingVertical: 14,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalAlertBtnDefault: {
+      backgroundColor: brandColor,
+    },
+    modalAlertBtnDestructive: {
+      backgroundColor: '#EF4444',
+    },
+    modalAlertBtnCancel: {
+      backgroundColor: theme?.surface || "#f0f0f0",
+      borderWidth: 1,
+      borderColor: theme?.border || "#e1e5e9",
+    },
+    modalAlertBtnText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#fff'
+    },
     header: {
       flexDirection: "row",
       alignItems: "center",
@@ -653,6 +819,12 @@ const createStyles = (theme: any) =>
       justifyContent: "center",
       marginRight: 12,
       position: "relative",
+    },
+    headerAvatarImage: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 20,
+      resizeMode: 'cover',
     },
     contactAvatarText: {
       color: "#fff",
@@ -726,6 +898,12 @@ const createStyles = (theme: any) =>
       justifyContent: "center",
       marginHorizontal: 8,
       marginTop: 4,
+    },
+    messageAvatarImage: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      resizeMode: 'cover',
     },
     avatarText: {
       color: "#fff",
@@ -856,20 +1034,20 @@ const createStyles = (theme: any) =>
     },
     attachmentOptions: {
       flexDirection: "row",
+      justifyContent: "space-evenly",
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingVertical: 20,
       backgroundColor: theme?.surface ?? "#fff",
       borderTopWidth: 1,
       borderTopColor: theme?.border ?? "#e1e5e9",
     },
     attachmentOption: {
       alignItems: "center",
-      marginRight: 24,
     },
     attachmentIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
+      width: 50,
+      height: 50,
+      borderRadius: 25,
       alignItems: "center",
       justifyContent: "center",
       marginBottom: 8,
@@ -877,6 +1055,45 @@ const createStyles = (theme: any) =>
     attachmentLabel: {
       fontSize: 12,
       color: theme?.textSecondary ?? "#6b7280",
+      fontWeight: '500',
+    },
+    pendingAttachmentContainer: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 4,
+      backgroundColor: theme.background,
+    },
+    pendingAttachmentPreview: {
+      position: 'relative',
+      alignSelf: 'flex-start',
+    },
+    pendingImage: {
+      width: 80,
+      height: 80,
+      borderRadius: 12,
+      backgroundColor: theme?.surface ?? '#f0f0f0',
+    },
+    pendingDocument: {
+      width: 80,
+      height: 80,
+      borderRadius: 12,
+      backgroundColor: theme?.surface ?? '#f0f0f0',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 8,
+    },
+    pendingDocumentName: {
+      fontSize: 10,
+      color: theme?.textSecondary,
+      marginTop: 4,
+      textAlign: 'center',
+    },
+    removeAttachmentBtn: {
+      position: 'absolute',
+      top: -8,
+      right: -8,
+      backgroundColor: theme.background,
+      borderRadius: 12,
     },
     inputContainer: {
       flexDirection: "row",
